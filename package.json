@@ -7,8 +7,7 @@
     "dev": "vite",
     "build": "run-p type-check \"build-only {@}\" --",
     "build:prod": "vite build",
-    "deploy": "bash deploy.sh",
-    "preview": "vite preview",
+    "preview:vite": "vite preview",
     "preview:svg": "node script/preview-svg.mjs",
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
@@ -26,8 +25,7 @@
     "axios": "^1.20.0",
     "pinia": "^4.0.3",
     "vue": "^3.5.40",
-    "vue-router": "^4.6.4",
-    "wrangler": "4.131.1"
+    "vue-router": "^4.6.4"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
