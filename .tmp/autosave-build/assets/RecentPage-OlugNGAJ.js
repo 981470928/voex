@@ -1,0 +1,1 @@
+import{A as e,m as t,t as n,y as r}from"./_plugin-vue_export-helper-DFIWztfB.js";import{t as i}from"./useImages-DlZciRW_.js";var a={class:`recent-page`},o=n(r({__name:`RecentPage`,setup(n){let{getImages:r}=i(`/`);return(n,r)=>(e(),t(`main`,a,`1`))}}),[[`__scopeId`,`data-v-1e6c61ac`]]);export{o as default};

@@ -1,0 +1,1 @@
+import{O as e,d as t,g as n,t as r}from"./_plugin-vue_export-helper-BavJeEXT.js";import{t as i}from"./useImages-DzGA_QNa.js";var a={class:`recent-page`},o=r(n({__name:`RecentPage`,setup(n){let{getImages:r}=i(`/`);return(n,r)=>(e(),t(`main`,a,`1`))}}),[[`__scopeId`,`data-v-1e6c61ac`]]);export{o as default};

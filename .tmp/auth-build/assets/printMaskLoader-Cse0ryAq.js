@@ -1,0 +1,2 @@
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/print-mask-SuojWNJ_.js","assets/messages-Dz_C-IEc.js","assets/printMask-BLGRbUDN.js"])))=>i.map(i=>d[i]);
+import{r as e}from"./rolldown-runtime-C0FnF6B9.js";import{t}from"./preload-helper-kNmmqUCw.js";var n=e({openFileViewerPrintMaskDesignerAsync:()=>r}),r=async e=>{let{openFileViewerPrintMaskDesigner:n}=await t(async()=>{let{openFileViewerPrintMaskDesigner:e}=await import(`./print-mask-SuojWNJ_.js`);return{openFileViewerPrintMaskDesigner:e}},__vite__mapDeps([0,1,2]));return n(e)};export{n as t};

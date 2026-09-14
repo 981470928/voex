@@ -1,0 +1,41 @@
+{
+  "findings": [
+    {
+      "category": "unresolved",
+      "file": "src/views/home/HomeAside.vue",
+      "line": 7,
+      "message": "Native select is used without an explicit ownership decision.",
+      "remediation": "Record Select/Listbox as native or reuse the authored canonical owner.",
+      "ruleId": "ownership.native-select-undecided",
+      "severity": "error"
+    },
+    {
+      "category": "unresolved",
+      "file": "src/views/team/TeamPage.vue",
+      "line": 283,
+      "message": "Native select is used without an explicit ownership decision.",
+      "remediation": "Record Select/Listbox as native or reuse the authored canonical owner.",
+      "ruleId": "ownership.native-select-undecided",
+      "severity": "error"
+    },
+    {
+      "category": "violation",
+      "file": "src/components/team/JoinTeamDialog.vue",
+      "line": 31,
+      "message": "Literal product textarea does not show evidence of the canonical resize-none rule.",
+      "remediation": "Use the shared Textarea owner or apply resize-none/resize: none with adequate height or auto-grow behavior.",
+      "ruleId": "form.textarea-resize-missing",
+      "severity": "error"
+    }
+  ],
+  "mode": "strict",
+  "projectRoot": "C:\\Users\\WS\\Desktop\\myself\\voex-main",
+  "schemaVersion": 1,
+  "summary": {
+    "errors": 3,
+    "total": 3,
+    "unresolved": 2,
+    "violations": 1,
+    "warnings": 0
+  }
+}
