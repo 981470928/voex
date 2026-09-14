@@ -9,8 +9,8 @@ import {
   sessionInitialized,
   type AuthSession,
 } from '@/service/auth-session';
-
-export const authHttp = axios.create({ baseURL: '/api', timeout: 30000, withCredentials: true });
+const baseURL = import.meta.env.MODE === 'production' ? 'http://192.140.173.58/api' : '/api';
+export const authHttp = axios.create({ baseURL, timeout: 30000, withCredentials: true });
 let refreshRequest: Promise<AuthSession> | undefined;
 
 export function refreshSession(): Promise<AuthSession> {
@@ -37,7 +37,7 @@ export function refreshSession(): Promise<AuthSession> {
 }
 
 const http = axios.create({
-  baseURL: '/api',
+  baseURL: baseURL,
   timeout: 30000,
   withCredentials: true,
 });
