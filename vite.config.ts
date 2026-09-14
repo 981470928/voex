@@ -4,36 +4,40 @@ import vue from '@vitejs/plugin-vue';
 import vueDevTools from 'vite-plugin-vue-devtools';
 import { createSvgIconsPlugin } from 'vite-plugin-svg-icons';
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => ({
-  base: mode === 'production' ? '/app/' : '/test/',
-  plugins: [
-    vue(),
-    vueDevTools(),
-    createSvgIconsPlugin({
-      iconDirs: [fileURLToPath(new URL('./src/assets/svg', import.meta.url))],
-      symbolId: 'icon-[dir]-[name]',
-      svgoOptions: {
-        plugins: [{ name: 'preset-default', params: { overrides: { removeViewBox: false } } }],
-      },
-    }),
-  ],
-  build: {
-    outDir: '/home/app/voex',
-    emptyOutDir: true,
-  },
-  resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url)),
+export default defineConfig(({ mode }) => {
+  const isCloudflarePages =
+    process.env.CF_PAGES === '1' || process.env.CF_PAGES === 'true' || process.env.CI === 'true';
+  return {
+    base: mode === 'production' ? '/app/' : '/test/',
+    plugins: [
+      vue(),
+      vueDevTools(),
+      createSvgIconsPlugin({
+        iconDirs: [fileURLToPath(new URL('./src/assets/svg', import.meta.url))],
+        symbolId: 'icon-[dir]-[name]',
+        svgoOptions: {
+          plugins: [{ name: 'preset-default', params: { overrides: { removeViewBox: false } } }],
+        },
+      }),
+    ],
+    build: {
+      outDir: isCloudflarePages ? 'dist' : '/home/app/voex',
+      emptyOutDir: true,
     },
-  },
-  server: {
-    port: 3000,
-    proxy: {
-      '/api': {
-        target:
-          loadEnv(mode, process.cwd(), 'VITE_').VITE_API_PROXY_TARGET || 'http://127.0.0.1:8090',
-        changeOrigin: true,
+    resolve: {
+      alias: {
+        '@': fileURLToPath(new URL('./src', import.meta.url)),
       },
     },
-  },
-}));
+    server: {
+      port: 3000,
+      proxy: {
+        '/api': {
+          target:
+            loadEnv(mode, process.cwd(), 'VITE_').VITE_API_PROXY_TARGET || 'http://127.0.0.1:8090',
+          changeOrigin: true,
+        },
+      },
+    },
+  };
+});
