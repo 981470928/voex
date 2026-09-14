@@ -5,10 +5,8 @@ import vueDevTools from 'vite-plugin-vue-devtools';
 import { createSvgIconsPlugin } from 'vite-plugin-svg-icons';
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  const isCloudflarePages =
-    process.env.CF_PAGES === '1' || process.env.CF_PAGES === 'true' || process.env.CI === 'true';
   return {
-    base: mode === 'production' ? '/app/' : '/test/',
+    base: mode === 'production' ? '/' : '/test/',
     plugins: [
       vue(),
       vueDevTools(),
@@ -21,7 +19,7 @@ export default defineConfig(({ mode }) => {
       }),
     ],
     build: {
-      outDir: isCloudflarePages ? 'dist' : '/home/app/voex',
+      outDir: 'dist',
       emptyOutDir: true,
     },
     resolve: {
