@@ -9,7 +9,7 @@ import {
   sessionInitialized,
   type AuthSession,
 } from '@/service/auth-session';
-const baseURL = import.meta.env.MODE === 'production' ? 'https://api.jmin.site' : '/api';
+const baseURL = import.meta.env.MODE === 'production' ? 'https://192.140.173.58:8090/api' : '/api';
 export const authHttp = axios.create({ baseURL, timeout: 30000, withCredentials: true });
 let refreshRequest: Promise<AuthSession> | undefined;
 
