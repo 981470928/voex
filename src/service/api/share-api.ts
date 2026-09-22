@@ -9,6 +9,7 @@ import {
   type Creator,
 } from '../auth-session';
 import type { DocumentPermissions, FileInfo } from './document-api';
+import type { DownloadOptions } from './upload-api';
 
 export type SharePermission = 'read' | 'edit';
 
@@ -65,7 +66,11 @@ export function fileShareUrl(token: string) {
 
 // Public links remain usable when a login session is absent or expired.
 // Do not use the authenticated client's recovery interceptor here.
-const sharedHttp = axios.create({ baseURL: '/api', timeout: 30000, withCredentials: true });
+const sharedHttp = axios.create({
+  baseURL: http.defaults.baseURL,
+  timeout: 30000,
+  withCredentials: true,
+});
 
 export async function restoreOptionalShareSession() {
   if (accessToken.value && accessExpiresAt.value > Date.now() + 30000) return;
@@ -103,10 +108,14 @@ export async function updateSharedFile(token: string, file_content: string, revi
   return data;
 }
 
-export async function downloadSharedAttachment(token: string, hash: string, signal?: AbortSignal) {
+export async function downloadSharedAttachment(
+  token: string,
+  hash: string,
+  options: DownloadOptions = {}
+) {
   const { data } = await sharedHttp.get<Blob>(
     `/shared-file/attachments/${encodeURIComponent(hash)}`,
-    { headers: shareHeaders(token), responseType: 'blob', signal }
+    { ...options, headers: shareHeaders(token), responseType: 'blob', timeout: 0 }
   );
   return data;
 }

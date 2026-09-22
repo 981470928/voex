@@ -9,7 +9,7 @@ import {
 import { refreshSession } from '@/service/api/https';
 import { safeReturnPath } from '@/utils/auth';
 
-const base = import.meta.env.MODE === 'production' ? '/' : '/test/';
+const base = import.meta.env.BASE_URL;
 
 const router = createRouter({
   history: createWebHistory(base),

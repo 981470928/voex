@@ -108,7 +108,7 @@
             <button
               type="button"
               class="shared-file__button"
-              :disabled="!!attachmentBusy || blocked"
+              :disabled="blocked"
               @click="downloadAttachment(attachment)"
             >
               下载
@@ -135,6 +135,7 @@ import LocalDraftDialog from '@/components/share/LocalDraftDialog.vue';
 import { useConfirm } from '@/composables/useConfirm';
 import { useNotificationStore } from '@/stores/notification';
 import { usePreviewerStore } from '@/stores/previewer';
+import { useDownloadStore } from '@/stores/download';
 import { MessageType } from '@/constant/status';
 import { errorMessage } from '@/utils/error';
 import { formatTime } from '@/utils/workspace';
@@ -151,6 +152,7 @@ const route = useRoute();
 const { confirm } = useConfirm();
 const notification = useNotificationStore();
 const previewer = usePreviewerStore();
+const downloadStore = useDownloadStore();
 const file = ref<SharedFile | null>(null);
 const loading = ref(true);
 const loadError = ref('');
@@ -178,7 +180,6 @@ let token = '';
 let leaveCheck: Promise<boolean> | undefined;
 let disposed = false;
 let optionalSessionAttempted = false;
-const objectUrls = new Set<string>();
 
 // Fragment tokens never reach HTTP URLs or referrer headers.
 const referrerMeta = document.createElement('meta');
@@ -325,7 +326,7 @@ function beforeUnload(event: BeforeUnloadEvent) {
 }
 window.addEventListener('beforeunload', beforeUnload);
 
-async function readAttachment(attachment: FileInfo, preview: boolean) {
+async function previewAttachment(attachment: FileInfo) {
   if (
     attachmentBusy.value ||
     blocked.value ||
@@ -336,24 +337,12 @@ async function readAttachment(attachment: FileInfo, preview: boolean) {
   attachmentBusy.value = attachment.hash;
   attachmentError.value = '';
   try {
-    const blob = await downloadSharedAttachment(token, attachment.hash, controller?.signal);
+    const blob = await downloadSharedAttachment(token, attachment.hash, {
+      signal: controller?.signal,
+    });
     if (disposed || current !== generation) return;
-    if (preview) {
-      previewer.file = new File([blob], attachment.name, { type: attachment.mime });
-      previewer.visible = true;
-    } else {
-      const url = URL.createObjectURL(blob);
-      objectUrls.add(url);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = attachment.name;
-      link.rel = 'noreferrer';
-      link.click();
-      setTimeout(() => {
-        URL.revokeObjectURL(url);
-        objectUrls.delete(url);
-      }, 1000);
-    }
+    previewer.file = new File([blob], attachment.name, { type: attachment.mime });
+    previewer.visible = true;
   } catch (cause) {
     if (!disposed && current === generation)
       attachmentError.value =
@@ -363,11 +352,10 @@ async function readAttachment(attachment: FileInfo, preview: boolean) {
     if (current === generation) attachmentBusy.value = '';
   }
 }
-function previewAttachment(attachment: FileInfo) {
-  void readAttachment(attachment, true);
-}
 function downloadAttachment(attachment: FileInfo) {
-  void readAttachment(attachment, false);
+  if (blocked.value || !file.value?.attachments.some((item) => item.hash === attachment.hash))
+    return;
+  downloadStore.enqueue(attachment, { kind: 'share', token });
 }
 
 watch(() => route.hash, load, { immediate: true });
@@ -378,7 +366,6 @@ onBeforeUnmount(() => {
   controller?.abort();
   previewer.close();
   referrerMeta.remove();
-  objectUrls.forEach((url) => URL.revokeObjectURL(url));
   window.removeEventListener('beforeunload', beforeUnload);
 });
 </script>

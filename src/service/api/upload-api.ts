@@ -71,9 +71,18 @@ export function listFiles(fileKey: string) {
   return http.get<ApiError, FileInfo[]>(`/files/${fileKey}`);
 }
 
-/** 下载文件 */
-export function downloadFile(fileKey: string, hash: string): Promise<Blob | null> {
-  return http.get(`/download/${fileKey}/${hash}`, { responseType: 'blob' });
+export type DownloadOptions = Pick<AxiosRequestConfig, 'signal' | 'onDownloadProgress'>;
+
+/** 文件传输不设超时，由调用方主动中止。 */
+export function downloadFile(
+  fileKey: string,
+  hash: string,
+  options: DownloadOptions = {}
+): Promise<Blob> {
+  return http.get<unknown, Blob>(
+    `/download/${encodeURIComponent(fileKey)}/${encodeURIComponent(hash)}`,
+    { ...options, responseType: 'blob', timeout: 0 }
+  );
 }
 
 /** 查询上传进度 */

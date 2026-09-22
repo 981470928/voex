@@ -70,11 +70,13 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { createDocument, type FileInfo } from '@/service/api/document-api';
-import { uploadFile, listFiles, downloadFile, getUploadProgress } from '@/service/api/upload-api';
+import { uploadFile, listFiles, getUploadProgress } from '@/service/api/upload-api';
 import type { UploadProgress } from '@/service/api/upload-api';
 import { errorMessage } from '@/utils/error';
 import { useNotificationStore } from '@/stores/notification';
+import { useDownloadStore } from '@/stores/download';
 const notification = useNotificationStore();
+const downloadStore = useDownloadStore();
 
 const docName = ref('');
 const currentKey = ref('');
@@ -150,20 +152,9 @@ async function handleListFiles() {
 }
 
 /** 下载文件 */
-async function handleDownload(hash: string, name: string) {
+function handleDownload(hash: string, name: string) {
   if (!currentKey.value) return;
-  try {
-    const blob = await downloadFile(currentKey.value, hash);
-    if (!blob) throw new Error('下载失败');
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = name;
-    a.click();
-    URL.revokeObjectURL(url);
-  } catch (err) {
-    notification.show(errorMessage(err), 'error');
-  }
+  downloadStore.enqueue({ hash, name }, { kind: 'document', fileKey: currentKey.value });
 }
 </script>
 

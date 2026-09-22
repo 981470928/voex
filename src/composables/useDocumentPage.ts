@@ -3,7 +3,7 @@ import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vu
 import { storeToRefs } from 'pinia';
 import { isAxiosError } from 'axios';
 import MilkdownEditor from '@/components/milkdown/MilkdownEditor.vue';
-import { listFiles, downloadFile, deleteAttachment } from '@/service/api/upload-api';
+import { listFiles, deleteAttachment } from '@/service/api/upload-api';
 import {
   getDocument,
   updateDocument,
@@ -17,6 +17,7 @@ import { useFileUpload } from '@/utils/dom';
 import { desktopLocation, formatTime } from '@/utils/workspace';
 import { errorMessage } from '@/utils/error';
 import { useUploadStore } from '@/stores/upload';
+import { useDownloadStore } from '@/stores/download';
 import { usePreviewerStore } from '@/stores/previewer';
 import { useModalStore, ModalType } from '@/stores/modal';
 import { useNotificationStore } from '@/stores/notification';
@@ -55,6 +56,7 @@ export function useDocumentPage() {
   const notification = useNotificationStore();
   const previewer = usePreviewerStore();
   const uploadStore = useUploadStore();
+  const downloadStore = useDownloadStore();
   const { uploadingFiles } = storeToRefs(uploadStore);
   const { selectFiles } = useFileUpload();
   const { confirm } = useConfirm();
@@ -356,21 +358,10 @@ export function useDocumentPage() {
     }
   }
 
-  async function handleDownload(file: FileInfo) {
+  function handleDownload(file: FileInfo) {
     const key = activeDocKey.value;
     if (!key) return;
-    try {
-      const blob = await downloadFile(key, file.hash);
-      if (!blob) throw new Error('附件下载失败');
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = file.name;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (cause) {
-      notification.show(errorMessage(cause), 'error', 0);
-    }
+    downloadStore.enqueue(file, { kind: 'document', fileKey: key });
   }
 
   async function handlePreview(file: FileInfo) {

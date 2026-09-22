@@ -13,6 +13,7 @@
 | CRUD               | src/composables/useCreateDocument.ts、src/composables/useDocumentPage.ts       | 后端 API.md                  | 创建后打开 / 删除后返回目录             | 浏览器目录→编辑            |
 | Scrollbar          | src/assets/style/main.css                                                      | DESIGN.md 与 theme.styl      | geometry only                           | 浏览器 computed style      |
 | Team form / action | src/components/team/team.styl、JoinTeamDialog.vue、ProjectPrivilegesDialog.vue | 本次团队方案、team-api.ts    | 申请 / 权限、沿用 VoexModal             | 错误、IME、焦点、窄屏      |
+| Download queue     | src/stores/download.ts、src/components/DownloadQueue.vue                       | 本次下载需求及附件 API       | 普通附件 / 分享附件，全局非模态浮层     | 进度、中止、去重、浏览器保存 |
 | Select/Listbox     | 原生 select                                                                    | 浏览器/操作系统              | 团队选择、转让对象；接受平台 popup 外观 | label、键盘、窄屏          |
 
 ## 导航与数据
@@ -54,3 +55,11 @@
 ## 验证范围
 
 不使用单元测试。执行 vue-tsc、ESLint、Vite build 和后端 tsc；浏览器验证网格/列表、路径、嵌套、创建提示和路由、刷新、错误与键盘。真实数据库迁移须单独标明是否已执行，模拟接口不能作为 MySQL 事务或迁移通过的证据。
+
+## 附件下载
+
+编辑页、分享页和上传调试页的附件下载统一推入全局 download store。左下角入口在所有路由常驻，新任务自动展开向上的下载列表；浮层不阻断页面操作，Tab 可访问，Escape/外部点击收起，Escape 返回入口焦点。已有 NotificationBar 负责重复下载和失败提示，进度与失败原因保留在列表，进行中的任务优先展示。
+
+最多并发 2 个传输，其他任务排队；排队、下载与交给浏览器期间按 hash 去重，结束或中止后可再次下载同一 hash。下载请求 timeout=0，使用独立 AbortController 中止；路由切换继续下载。总大小已知时显示百分比与字节数，未知时显示已接收字节与不定进度，不伪造百分比。
+
+收齐文件后自动触发浏览器保存，待浏览器处理点击后在下一事件循环撤销 object URL，释放文件数据、请求来源和去重项。列表仅保留最多 20 条结束任务的文字/数字元数据，可清除；不保留 Blob、分享凭据或可重复使用的下载 URL。状态“已交给浏览器”表示已发起保存，实际保存结果由浏览器负责。失败或中止后从原附件入口重新下载。
