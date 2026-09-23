@@ -797,7 +797,13 @@ defineExpose({ getMarkdown, insertAttachment });
     background transparent
     box-shadow none
 
-    &[data-show='false'], &[hidden]
+    // 定位前保留尺寸和 offsetParent，避免隐藏状态下算出页面坐标。
+    &[data-show='false']
+      display flex
+      visibility hidden
+      pointer-events none
+
+    &[hidden]
       display none
 
   &__block-handle, &__block-add
