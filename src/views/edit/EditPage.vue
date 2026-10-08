@@ -1,6 +1,7 @@
 <template>
   <div
     class="edit-page"
+    :class="{ 'edit-page--mobile': isMobile }"
     @keydown.capture="handleEditorActivity"
     @pointerdown.capture="handleEditorActivity"
     @input.capture="handleEditorActivity"
@@ -9,66 +10,111 @@
     @compositionend.capture="handleCompositionEnd"
   >
     <!-- Left: EditorLeftContainer -->
-    <EditorLeftContainer
-      v-show="!sidebarCollapsed"
-      :tree="projectTree"
-      :active-doc-key="activeDocKey"
-      :loading="loading"
-      :creating="creating"
-      :busy="busy"
-      :error="loadError"
-      @toggle="sidebarCollapsed = true"
-      @create="handleCreateDoc"
-      @delete="handleDeleteDoc"
-      @rename="handleRenameDoc"
-    />
+    <VoexDrawer
+      id="editor-document-drawer"
+      :enabled="isMobile"
+      :model-value="drawer.documentOpen"
+      title="文档目录"
+      side="left"
+      :width="320"
+      @update:model-value="drawer.setOpen('documents', $event)"
+    >
+      <EditorLeftContainer
+        v-show="isMobile || !sidebarCollapsed"
+        :mobile="isMobile"
+        :tree="projectTree"
+        :active-doc-key="activeDocKey"
+        :loading="loading"
+        :creating="creating"
+        :busy="busy"
+        :error="loadError"
+        @toggle="sidebarCollapsed = true"
+        @create="handleCreateDoc"
+        @delete="handleDeleteDoc"
+        @rename="handleRenameDoc"
+      />
+    </VoexDrawer>
 
     <!-- Center: Editor -->
-  <main class="edit-page__center">
+    <main class="edit-page__center">
       <div class="edit-page__header">
         <button
-          v-if="sidebarCollapsed"
-          class="edit-page__sidebar-btn voex-icon-btn_32"
-          title="展开侧栏"
-          @click="sidebarCollapsed = false"
-        >
-          <SvgIcon name="sidebar-expand" :size="24" />
-        </button>
-        <span class="edit-page__title" @dblclick="activeDoc && handleRenameDoc(activeDoc)">
-          {{ activeDoc?.file_name || '请选择文档' }}
-        </span>
-        <span
-          v-if="activeDocKey"
-          class="edit-page__sync-status"
-          :class="{ 'edit-page__sync-status--error': !!saveError && !showSavingAnimation }"
-          role="img"
-          :aria-label="syncStatus"
-          :title="syncStatus"
-        >
-          <SvgIcon v-if="showSavingAnimation" name="sync" :size="16" class="edit-page__spinner" />
-          <template v-else>
-            <SvgIcon name="cloud" :size="20" />
-            <span class="edit-page__heartbeat" aria-hidden="true" />
-          </template>
-        </span>
-        <button
-          v-if="activeDocKey"
+          v-if="isMobile || sidebarCollapsed"
           type="button"
-          class="edit-page__button edit-page__button--secondary"
-          :disabled="busy"
-          @click="handleExportDocument"
+          class="edit-page__icon-button"
+          :title="isMobile ? (drawer.documentOpen ? '折叠文档目录' : '展开文档目录') : '展开侧栏'"
+          :aria-label="
+            isMobile ? (drawer.documentOpen ? '折叠文档目录' : '展开文档目录') : '展开侧栏'
+          "
+          :aria-expanded="isMobile ? drawer.documentOpen : undefined"
+          :aria-controls="isMobile ? 'editor-document-drawer' : undefined"
+          @click="isMobile ? drawer.toggle('documents') : (sidebarCollapsed = false)"
         >
-          导出
+          <SvgIcon :name="drawer.documentOpen ? 'sidebar-collapse' : 'sidebar-expand'" :size="20" />
         </button>
-        <button
-          v-if="canShare"
-          type="button"
-          class="edit-page__button edit-page__button--secondary edit-page__share-button"
-          :disabled="busy"
-          @click="showShare = true"
-        >
-          分享
-        </button>
+        <div class="edit-page__heading">
+          <span
+            class="edit-page__title"
+            :title="activeDoc?.file_name"
+            @dblclick="activeDoc && handleRenameDoc(activeDoc)"
+          >
+            {{ activeDoc?.file_name || '请选择文档' }}
+          </span>
+          <span
+            v-if="activeDocKey"
+            class="edit-page__sync-status"
+            :class="{ 'edit-page__sync-status--error': !!saveError && !showSavingAnimation }"
+            role="img"
+            :aria-label="syncStatus"
+            :title="syncStatus"
+          >
+            <SvgIcon v-if="showSavingAnimation" name="sync" :size="16" class="edit-page__spinner" />
+            <template v-else>
+              <SvgIcon name="cloud" :size="20" />
+              <span class="edit-page__heartbeat" aria-hidden="true" />
+            </template>
+          </span>
+        </div>
+        <div class="edit-page__header-actions">
+          <button
+            v-if="activeDocKey"
+            type="button"
+            class="edit-page__icon-button"
+            title="导出"
+            aria-label="导出"
+            :disabled="busy"
+            @click="handleExportDocument"
+          >
+            <SvgIcon name="download" :size="18" />
+          </button>
+          <button
+            v-if="canShare"
+            type="button"
+            class="edit-page__icon-button"
+            title="分享"
+            aria-label="分享"
+            :disabled="busy"
+            @click="showShare = true"
+          >
+            <SvgIcon name="share" :size="18" />
+          </button>
+          <button
+            v-if="isMobile"
+            type="button"
+            class="edit-page__icon-button"
+            :title="drawer.attachmentOpen ? '折叠文件列表' : '展开文件列表'"
+            :aria-label="drawer.attachmentOpen ? '折叠文件列表' : '展开文件列表'"
+            :aria-expanded="drawer.attachmentOpen"
+            aria-controls="editor-attachment-drawer"
+            @click="drawer.toggle('attachments')"
+          >
+            <SvgIcon
+              :name="drawer.attachmentOpen ? 'sidebar-collapse' : 'sidebar-expand'"
+              :size="20"
+              class="edit-page__right-sidebar-icon"
+            />
+          </button>
+        </div>
       </div>
       <div v-if="saveError" class="edit-page__save-error" role="alert">
         <p>{{ saveError }}</p>
@@ -110,6 +156,7 @@
             :upload-attachments="triggerFileUpload"
             :on-preview-attachment="handlePreviewAttachment"
             :readonly="!canWrite"
+            :show-toolbar="!isMobile"
             @ready="handleEditorReady"
             @change="handleEditorChange"
           />
@@ -140,18 +187,30 @@
     </main>
 
     <!-- Right: Attachments -->
-    <AttachmentPanel
-      :attachments="attachments"
-      :uploading-files="uploadingFiles"
-      :active-doc-key="activeDocKey"
-      :is-dragging="isDragging"
-      @update:is-dragging="isDragging = $event"
-      @download="handleDownload"
-      @delete="handleDeleteAttachment"
-      @insert="handleInsertAttachment"
-      @preview="handlePreviewAttachment"
-      @drop="handleDrop"
-    />
+    <VoexDrawer
+      id="editor-attachment-drawer"
+      :enabled="isMobile"
+      :model-value="drawer.attachmentOpen"
+      title="文件列表"
+      side="right"
+      @update:model-value="drawer.setOpen('attachments', $event)"
+    >
+      <AttachmentPanel
+        :mobile="isMobile"
+        :can-upload="canWrite && !busy"
+        :attachments="attachments"
+        :uploading-files="uploadingFiles"
+        :active-doc-key="activeDocKey"
+        :is-dragging="isDragging"
+        @upload="triggerFileUpload"
+        @update:is-dragging="isDragging = $event"
+        @download="handleDownload"
+        @delete="handleDeleteAttachment"
+        @insert="handleInsertAttachment"
+        @preview="handlePreviewAttachment"
+        @drop="handleDrop"
+      />
+    </VoexDrawer>
     <ShareDialog
       v-if="activeDoc && canShare"
       :key="activeDocKey"
@@ -166,6 +225,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import SvgIcon from '@/components/SvgIcon.vue';
+import VoexDrawer from '@/components/VoexDrawer.vue';
+import { useDrawerStore } from '@/stores/drawer';
+import { isMobile } from '@/utils/platform';
 import MilkdownEditor from '@/components/milkdown/MilkdownEditor.vue';
 import EditorLeftContainer from '@/views/edit/EditorLeftContainer.vue';
 import AttachmentPanel from '@/views/edit/AttachmentPanel.vue';
@@ -181,6 +243,7 @@ import { useNotificationStore } from '@/stores/notification';
 import { errorMessage } from '@/utils/error';
 import type { ApiError } from '@/service/api/index';
 
+const drawer = useDrawerStore();
 const sidebarCollapsed = ref(false);
 const showShare = ref(false);
 const showDraft = ref(false);
@@ -230,6 +293,7 @@ const localContent = computed(() => {
   return editorRef.value?.getMarkdown() ?? currentContent.value;
 });
 watch(activeDocKey, () => {
+  drawer.closeAll();
   showShare.value = false;
   showDraft.value = false;
 });
@@ -263,7 +327,10 @@ watch(
   { flush: 'sync' }
 );
 
-onBeforeUnmount(() => clearTimeout(saveAnimationTimer));
+onBeforeUnmount(() => {
+  clearTimeout(saveAnimationTimer);
+  drawer.closeAll();
+});
 
 const syncStatus = computed(() => {
   if (showSavingAnimation.value) return '正在自动保存';
@@ -273,7 +340,9 @@ const syncStatus = computed(() => {
 });
 
 function handleInsertAttachment(file: FileInfo) {
-  if (canWrite.value) editorRef.value?.insertAttachment(file);
+  if (!canWrite.value) return;
+  editorRef.value?.insertAttachment(file);
+  if (isMobile) drawer.closeAll();
 }
 
 function handlePreviewAttachment(file: FileInfo) {
@@ -329,6 +398,8 @@ async function handleExportDocument() {
 .edit-page
   display flex
   height 100dvh
+  min-width 0
+  overflow hidden
   background var(--color-bg-panel)
 
   /* ---------- Center: editor ---------- */
@@ -341,24 +412,89 @@ async function handleExportDocument() {
   &__header
     display flex
     align-items center
-    justify-content center
     gap 12px
-    padding 0 52px
+    padding 0 20px
     flex-shrink 0
     border-bottom 1px solid var(--color-border-primary)
     text-align center
     height 56px
     line-height 56px
 
-  &__sidebar-btn
-    position fixed
-    left 12px
-    top 12px
-    z-index 50
+  &__heading
+    display flex
+    align-items center
+    flex 1
+    min-width 0
+    gap 8px
 
-  &__share-button
+  &__header-actions
+    display flex
+    align-items center
+    gap 8px
     margin-left auto
     flex-shrink 0
+
+  &__icon-button
+    display inline-flex
+    align-items center
+    justify-content center
+    flex-shrink 0
+    width 36px
+    height 36px
+    padding 0
+    border 1px solid var(--color-border-primary)
+    border-radius 50%
+    background var(--color-bg-translucent)
+    color var(--color-text-secondary)
+    cursor pointer
+    transition background .15s, color .15s
+
+    &:hover:not(:disabled)
+      background var(--color-accent-tint)
+      color var(--color-text-primary)
+
+    &:active:not(:disabled)
+      background var(--color-bg-quaternary)
+
+    &:focus-visible
+      outline 2px solid var(--color-accent)
+      outline-offset 2px
+
+    &:disabled
+      opacity .5
+      cursor not-allowed
+
+  &__right-sidebar-icon
+    transform scaleX(-1)
+
+  &--mobile
+    .edit-page__header
+      height auto
+      min-height 56px
+      padding 6px 8px
+      padding-top unquote('max(6px, env(safe-area-inset-top))')
+      padding-left unquote('max(8px, env(safe-area-inset-left))')
+      padding-right unquote('max(8px, env(safe-area-inset-right))')
+      gap 6px
+      line-height 1.4
+
+    .edit-page__heading, .edit-page__header-actions
+      gap 4px
+
+    .edit-page__icon-button
+      width 44px
+      height 44px
+
+    .milkdown-editor__content
+      padding 20px 16px 72px
+      padding-bottom unquote('max(72px, env(safe-area-inset-bottom))')
+
+    .edit-page__save-error
+      padding 10px 16px
+
+  @media (prefers-reduced-motion: reduce)
+    &__icon-button
+      transition none
 
   &__save-error
     padding 12px 20px

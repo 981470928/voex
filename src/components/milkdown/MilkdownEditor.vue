@@ -1,6 +1,11 @@
 <template>
   <section class="milkdown-editor" :class="{ 'milkdown-editor--readonly': readonly }">
-    <div v-if="!readonly" class="milkdown-editor__toolbar" role="group" aria-label="编辑工具">
+    <div
+      v-if="!readonly && showToolbar"
+      class="milkdown-editor__toolbar"
+      role="group"
+      aria-label="编辑工具"
+    >
       <button
         v-for="action in toolbarActions"
         :key="action.id"
@@ -84,6 +89,7 @@ const props = withDefaults(
     allowAttachments?: boolean;
     onPreviewAttachment?: (file: FileInfo) => void;
     readonly?: boolean;
+    showToolbar?: boolean;
   }>(),
   {
     defaultValue: '',
@@ -92,6 +98,7 @@ const props = withDefaults(
     allowAttachments: true,
     onPreviewAttachment: undefined,
     readonly: false,
+    showToolbar: true,
   }
 );
 

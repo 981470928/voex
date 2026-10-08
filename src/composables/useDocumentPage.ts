@@ -46,8 +46,6 @@ export function useDocumentPage() {
   const saveConflict = ref(false);
   const busy = ref(false);
   const isDragging = ref(false);
-  const showDocDrawer = ref(false);
-  const showAttachDrawer = ref(false);
   const editorRef = ref<InstanceType<typeof MilkdownEditor> | null>(null);
   const editorReady = ref(false);
   const currentContent = ref('');
@@ -244,8 +242,6 @@ export function useDocumentPage() {
     projectTree.value = null;
     attachments.value = [];
     editorReady.value = false;
-    showDocDrawer.value = false;
-    showAttachDrawer.value = false;
     try {
       const key = String(route.params.file_key ?? '');
       const doc = await getDocument(key, signal);
@@ -459,8 +455,6 @@ export function useDocumentPage() {
     reloadAfterSaveError,
     editorReady,
     isDragging,
-    showDocDrawer,
-    showAttachDrawer,
     editorRef,
     handleCreateDoc,
     handleDeleteDoc,

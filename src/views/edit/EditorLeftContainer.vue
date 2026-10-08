@@ -1,6 +1,6 @@
 <template>
-  <aside class="editor-left" aria-label="当前项目目录">
-    <div class="editor-left__header">
+  <aside class="editor-left" :class="{ 'editor-left--mobile': mobile }" aria-label="当前项目目录">
+    <div v-if="!mobile" class="editor-left__header">
       <RouterLink
         :to="desktopLocation(undefined, undefined, displayedTree?.project.team_key)"
         class="editor-left__logo"
@@ -84,6 +84,7 @@ import type { ProjectTree as ProjectTreeData } from '@/service/api/workspace-api
 
 const props = defineProps<{
   tree: ProjectTreeData | null;
+  mobile?: boolean;
   activeDocKey: string;
   loading?: boolean;
   creating?: boolean;
@@ -143,6 +144,23 @@ watch(
   flex-shrink 0
   background var(--color-bg-panel)
   border-right 1px solid var(--color-border-primary)
+  &--mobile
+    flex 1
+    width 100%
+    min-height 0
+    min-width 0
+    border-right none
+
+    :deep(.project-tree__folder), :deep(.project-tree__file > a)
+      min-height 44px
+
+    :deep(.project-tree__file > button)
+      width 40px
+      height 40px
+
+    .editor-left__footer button, .editor-left__footer a
+      min-height 44px
+
   &__header
     display flex
     align-items center

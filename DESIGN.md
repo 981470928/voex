@@ -51,7 +51,7 @@ components:
 
 Desktop 顶栏左侧创建、右侧面包屑。内容最大宽 1480px，桌面边距 36px，720px 以下边距 16px。目录网格最小卡宽 180px，手机两列；列表在窄屏保留名称和操作。两种模式使用同一数据、排序与动作。
 
-目录用 document 自然滚动，每页 48 项，页码位于 URL。编辑器保持三栏结构，项目树宽 264px，正文与树各自滚动；手机通过公共弹窗打开项目树。文件路由是状态来源，目录上下文通过 `/desktop?project=…&folder=…` 恢复。
+目录用 document 自然滚动，每页 48 项，页码位于 URL。编辑器在桌面保持三栏结构，项目树宽 264px，正文与树各自滚动。`src/utils/platform.ts` 的 `isMobile` 为真时启用手机模式：正文占满宽度，文档目录从左侧抽屉打开，文件列表从右侧抽屉打开；标题栏提供两个入口。手机隐藏编辑工具栏，添加附件入口放在文件列表内。分享与导出在桌面和手机均为标题栏右侧圆形图标按钮，手机按钮 44px，长标题省略并保留保存状态。文件路由是状态来源，目录上下文通过 `/desktop?project=…&folder=…` 恢复。
 
 ## Elevation & Depth
 
@@ -63,7 +63,7 @@ Desktop 顶栏左侧创建、右侧面包屑。内容最大宽 1480px，桌面�
 
 ## Components
 
-`InputDialog` 是命名输入和异步提交的公共入口；`ConfirmDialog` 是删除/未保存确认入口；`VoexModal` 负责焦点、Escape、背景隔离和滚动锁；`NotificationBar` 与 notification store 负责统一提示。创建文件统一通过 `useCreateDocument`：后台确定落点，展示实际路径 1000ms 后跳转。
+`InputDialog` 是命名输入和异步提交的公共入口；`ConfirmDialog` 是删除/未保存确认入口；`VoexModal` 负责焦点、Escape、背景隔离和滚动锁；`VoexDrawer` 复用其 left/right 布局变体，`stores/drawer.ts` 管理互斥的左右抽屉，切换文档或离开编辑页时关闭；`NotificationBar` 与 notification store 负责统一提示。创建文件统一通过 `useCreateDocument`：后台确定落点，展示实际路径 1000ms 后跳转。
 
 `ProjectTree` 使用嵌套列表、文件夹 disclosure button 和 RouterLink；键盘可 Tab 聚焦、Enter 激活，展开状态由 `aria-expanded` 表达，不冒充具备方向键操作的 ARIA tree widget。
 
@@ -72,6 +72,8 @@ Desktop 顶栏左侧创建、右侧面包屑。内容最大宽 1480px，桌面�
 团队共用的表单、按钮、状态样式由 `src/components/team/team.styl` 消费既有 `theme.styl` 语义变量：背景 `--color-bg-secondary` / `--color-bg-panel`，文本 `--color-text-primary` / `--color-text-secondary` / `--color-text-tertiary`，边框 `--color-border-primary`，操作 `--color-brand-bg` / `--color-brand-text`，危险操作 `--color-red`，焦点 `--color-accent`。未新增全局颜色或另一份 theme。团队与项目权限弹窗仍由 VoexModal 负责焦点和滚动隔离，权限与移除确认使用 ConfirmDialog。
 
 认证页面复用 `AuthLayout`（登录宽 320px，注册/资料宽 360px）、`AuthField`、`ProfileFields`、`AvatorPicker`。Voex 既有白色 logo 位于标题上方，表单无外围卡片；系统字体，标题 20px / 600，输入 14px，按钮高 44px / 胶囊圆角，输入圆角 10px。短屏与手机保持自然滚动，账号/密码不截断粘贴。会话过期使用既有 `VoexModal` 配合 `LoginForm`，避免销毁当前编辑页面。
+
+下载队列以内联区域放在附件底部，保留展开/折叠与独立滚动，沿用全局 download store，不占用悬浮位置。
 
 滚动条基线由 `src/assets/style/main.css` 全局定义，thumb/track/hover/active 映射现有主题变量，并提供 forced-colors 回退。按钮有 hover、focus-visible、pressed、disabled 状态。动画尊重 prefers-reduced-motion。
 

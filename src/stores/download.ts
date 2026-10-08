@@ -57,7 +57,7 @@ export const useDownloadStore = defineStore('download', () => {
     if (!hash || disposed) return;
     expanded.value = true;
     if (tasks.has(hash)) {
-      notification.show('该文件正在下载，请在左下角查看进度', 'info');
+      notification.show('该文件正在下载，请在下载列表查看进度', 'info');
       return;
     }
     const item = reactive<DownloadItem>({
@@ -140,7 +140,7 @@ export const useDownloadStore = defineStore('download', () => {
                 ? '无法连接服务器，请检查网络后从附件列表重新下载'
                 : '附件下载失败，请从附件列表重新下载'
           : '附件下载失败，请从附件列表重新下载';
-        notification.show('文件下载失败，请在左下角查看详情', 'error');
+        notification.show('文件下载失败，请在下载列表查看详情', 'error');
       }
     } finally {
       // eslint-disable-next-line no-useless-assignment -- Release file bytes on every exit path.

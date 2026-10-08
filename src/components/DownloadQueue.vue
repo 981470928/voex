@@ -1,100 +1,98 @@
 <template>
-  <Teleport to="body">
-    <div ref="root" class="download-queue" @keydown.esc.stop.prevent="close">
-      <button
-        ref="trigger"
-        type="button"
-        class="download-queue__trigger"
-        :aria-expanded="store.expanded"
-        aria-controls="download-queue-panel"
-        @click="store.expanded = !store.expanded"
-      >
-        <SvgIcon name="download" :size="18" />
-        <span>下载</span>
-        <span v-if="store.activeCount" class="download-queue__count">{{ store.activeCount }}</span>
-        <SvgIcon
-          name="chevron-right"
-          :size="14"
-          class="download-queue__chevron"
-          :class="{ 'download-queue__chevron--expanded': store.expanded }"
-        />
-      </button>
-      <section
-        v-show="store.expanded"
-        id="download-queue-panel"
-        class="download-queue__panel"
-        aria-labelledby="download-queue-title"
-      >
-        <header class="download-queue__header">
-          <div>
-            <h2 id="download-queue-title">下载列表</h2>
-            <p aria-live="polite">{{ summary }}</p>
+  <div class="download-queue" @keydown.esc="onEscape">
+    <button
+      ref="trigger"
+      type="button"
+      class="download-queue__trigger"
+      :aria-expanded="store.expanded"
+      aria-controls="download-queue-panel"
+      @click="store.expanded = !store.expanded"
+    >
+      <SvgIcon name="download" :size="18" />
+      <span>下载</span>
+      <span v-if="store.activeCount" class="download-queue__count">{{ store.activeCount }}</span>
+      <SvgIcon
+        name="chevron-right"
+        :size="14"
+        class="download-queue__chevron"
+        :class="{ 'download-queue__chevron--expanded': store.expanded }"
+      />
+    </button>
+    <section
+      v-show="store.expanded"
+      id="download-queue-panel"
+      class="download-queue__panel"
+      aria-labelledby="download-queue-title"
+    >
+      <header class="download-queue__header">
+        <div>
+          <h2 id="download-queue-title">下载列表</h2>
+          <p aria-live="polite">{{ summary }}</p>
+        </div>
+        <button
+          type="button"
+          class="download-queue__action"
+          :disabled="!hasFinished"
+          @click="store.clearFinished"
+        >
+          清除记录
+        </button>
+        <button
+          type="button"
+          class="download-queue__action download-queue__close"
+          aria-label="收起下载列表"
+          title="收起下载列表"
+          @click="close"
+        >
+          <SvgIcon name="close" :size="16" />
+        </button>
+      </header>
+      <ul v-if="store.items.length" class="download-queue__list" aria-label="下载任务">
+        <li v-for="item in displayedItems" :key="item.id" class="download-queue__item">
+          <div class="download-queue__row">
+            <SvgIcon name="page" :size="18" class="download-queue__file-icon" />
+            <span class="download-queue__name">{{ item.name }}</span>
+            <button
+              v-if="item.status === 'queued' || item.status === 'downloading'"
+              type="button"
+              class="download-queue__action"
+              :aria-label="'中止下载：' + item.name"
+              @click="cancel(item.id)"
+            >
+              中止
+            </button>
           </div>
-          <button
-            type="button"
-            class="download-queue__action"
-            :disabled="!hasFinished"
-            @click="store.clearFinished"
-          >
-            清除记录
-          </button>
-          <button
-            type="button"
-            class="download-queue__action download-queue__close"
-            aria-label="收起下载列表"
-            title="收起下载列表"
-            @click="close"
-          >
-            <SvgIcon name="close" :size="16" />
-          </button>
-        </header>
-        <ul v-if="store.items.length" class="download-queue__list" aria-label="下载任务">
-          <li v-for="item in displayedItems" :key="item.id" class="download-queue__item">
-            <div class="download-queue__row">
-              <SvgIcon name="page" :size="18" class="download-queue__file-icon" />
-              <span class="download-queue__name">{{ item.name }}</span>
-              <button
-                v-if="item.status === 'queued' || item.status === 'downloading'"
-                type="button"
-                class="download-queue__action"
-                :aria-label="'中止下载：' + item.name"
-                @click="cancel(item.id)"
-              >
-                中止
-              </button>
-            </div>
-            <div class="download-queue__details">
-              <span
-                class="download-queue__status"
-                :class="{ 'download-queue__status--failed': item.status === 'failed' }"
-                aria-live="polite"
-                >{{ statusText[item.status] }}</span
-              >
-              <span v-if="item.status === 'downloading'" class="download-queue__bytes">
-                {{ formatBytes(item.loaded) }}
-                <template v-if="item.total !== null">
-                  / {{ formatBytes(item.total) }} · {{ percent(item) }}%
-                </template>
-              </span>
-            </div>
-            <progress
-              v-if="item.status === 'downloading'"
-              class="download-queue__progress"
-              :value="item.total === null ? undefined : percent(item)"
-              max="100"
-              :aria-label="item.name + '下载进度'"
-            />
-            <p v-if="item.error" class="download-queue__error">{{ item.error }}</p>
-          </li>
-        </ul>
-        <p v-else class="download-queue__empty">暂无下载任务<br />点击附件的下载按钮开始</p>
-      </section>
-    </div>
-  </Teleport>
+          <div class="download-queue__details">
+            <span
+              class="download-queue__status"
+              :class="{ 'download-queue__status--failed': item.status === 'failed' }"
+              aria-live="polite"
+              >{{ statusText[item.status] }}</span
+            >
+            <span v-if="item.status === 'downloading'" class="download-queue__bytes">
+              {{ formatBytes(item.loaded) }}
+              <template v-if="item.total !== null">
+                / {{ formatBytes(item.total) }} · {{ percent(item) }}%
+              </template>
+            </span>
+          </div>
+          <progress
+            v-if="item.status === 'downloading'"
+            class="download-queue__progress"
+            :value="item.total === null ? undefined : percent(item)"
+            max="100"
+            :aria-label="item.name + '下载进度'"
+          />
+          <p v-if="item.error" class="download-queue__error">{{ item.error }}</p>
+        </li>
+      </ul>
+      <p v-else class="download-queue__empty">暂无下载任务<br />点击附件的下载按钮开始</p>
+    </section>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import SvgIcon from '@/components/SvgIcon.vue';
 import {
   isDownloadActive,
@@ -104,7 +102,6 @@ import {
 } from '@/stores/download';
 
 const store = useDownloadStore();
-const root = ref<HTMLElement>();
 const trigger = ref<HTMLButtonElement>();
 const displayedItems = computed(() => [
   ...store.items.filter(isDownloadActive),
@@ -146,20 +143,21 @@ async function cancel(id: number) {
   trigger.value?.focus();
 }
 
-function onOutsidePointer(event: PointerEvent) {
-  if (event.target instanceof Node && !root.value?.contains(event.target)) store.expanded = false;
+function onEscape(event: KeyboardEvent) {
+  if (!store.expanded) return;
+  event.preventDefault();
+  event.stopPropagation();
+  close();
 }
-
-onMounted(() => document.addEventListener('pointerdown', onOutsidePointer));
-onBeforeUnmount(() => document.removeEventListener('pointerdown', onOutsidePointer));
 </script>
 
 <style scoped lang="stylus">
 .download-queue
-  position fixed
-  left calc(16px + env(safe-area-inset-left))
-  bottom calc(16px + env(safe-area-inset-bottom))
-  z-index 1200
+  display flex
+  flex-direction column
+  flex-shrink 0
+  min-width 0
+  border-top 1px solid var(--color-border-primary)
   color var(--color-text-primary)
   font-size 13px
   line-height 1.5
@@ -167,13 +165,12 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onOutsidePoint
     display flex
     align-items center
     gap 8px
+    width 100%
     min-height 44px
-    padding 8px 14px
-    border 1px solid var(--color-border-secondary)
-    border-radius 8px
-    background var(--color-bg-secondary)
+    padding 10px 16px
+    border 0
+    background transparent
     color var(--color-text-primary)
-    box-shadow var(--shadow-medium)
   &__count
     min-width 20px
     padding 0 5px
@@ -184,22 +181,17 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onOutsidePoint
     text-align center
     font-variant-numeric tabular-nums
   &__chevron
-    transform rotate(-90deg)
+    margin-left auto
+    transform rotate(90deg)
     &--expanded
-      transform rotate(90deg)
+      transform rotate(-90deg)
   &__panel
-    position absolute
-    bottom calc(100% + 8px)
-    left 0
     display flex
     flex-direction column
-    width 360px
-    max-width calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right))
-    max-height calc(100dvh - 100px - env(safe-area-inset-bottom) - env(safe-area-inset-top))
-    border 1px solid var(--color-border-secondary)
-    border-radius 8px
+    min-height 0
+    max-height 42dvh
+    border-top 1px solid var(--color-border-primary)
     background var(--color-bg-secondary)
-    box-shadow var(--shadow-medium)
     overflow hidden
   &__header
     display flex
@@ -246,7 +238,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onOutsidePoint
       cursor not-allowed
   &__list
     min-height 0
-    max-height 360px
+    max-height 280px
     overflow-y auto
     overscroll-behavior contain
     scrollbar-gutter stable

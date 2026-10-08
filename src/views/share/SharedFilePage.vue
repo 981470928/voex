@@ -119,6 +119,7 @@
         <p v-if="attachmentError" class="shared-file__attachment-error" role="alert">
           {{ attachmentError }}
         </p>
+        <DownloadQueue />
       </section>
     </template>
     <LocalDraftDialog v-model="showDraft" :content="localContent" />
@@ -127,6 +128,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import DownloadQueue from '@/components/DownloadQueue.vue';
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router';
 import { isAxiosError } from 'axios';
 import { MilkdownProvider } from '@milkdown/vue';

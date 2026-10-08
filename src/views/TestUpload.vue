@@ -63,12 +63,14 @@
         </tbody>
       </table>
       <p v-else class="empty">暂无文件</p>
+      <DownloadQueue />
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue';
+import DownloadQueue from '@/components/DownloadQueue.vue';
 import { createDocument, type FileInfo } from '@/service/api/document-api';
 import { uploadFile, listFiles, getUploadProgress } from '@/service/api/upload-api';
 import type { UploadProgress } from '@/service/api/upload-api';

@@ -4,7 +4,6 @@
     <router-view />
     <component :is="item.component" v-for="(item, key) in modalStore.modalInstanceMap" :key="key" />
     <FileViewerDialog />
-    <DownloadQueue />
     <NotificationBar />
     <SessionRecovery />
   </div>
@@ -15,7 +14,6 @@ import { useThemeStore } from '@/stores/theme';
 import { useModalStore } from '@/stores/modal';
 import FileViewerDialog from '@/components/dialog/FileViewerDialog.vue';
 import NotificationBar from '@/components/NotificationBar.vue';
-import DownloadQueue from '@/components/DownloadQueue.vue';
 import SessionRecovery from '@/components/auth/SessionRecovery.vue';
 const modalStore = useModalStore();
 // 初始化主题（读取 localStorage / 系统偏好，设置 data-theme）

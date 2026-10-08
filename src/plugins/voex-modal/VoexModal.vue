@@ -2,10 +2,12 @@
   <Teleport to="body">
     <Transition name="voex-modal" @before-leave="closeDialog">
       <dialog
-        v-if="modelValue"
+        v-if="modelValue || keepMounted"
+        v-show="!keepMounted || modelValue"
         ref="dialogRef"
         v-bind="$attrs"
         class="voex-modal-mask"
+        :class="{ 'voex-modal-mask--drawer': placement !== 'center' }"
         :style="viewportStyle"
         aria-modal="true"
         :aria-labelledby="title || $slots.header ? titleId : undefined"
@@ -30,7 +32,7 @@
                   v-if="closable"
                   type="button"
                   class="voex-modal__close"
-                  aria-label="关闭弹窗"
+                  :aria-label="placement === 'center' ? '关闭弹窗' : '关闭抽屉'"
                   :disabled="busy || closeDisabled"
                   @click="handleClose"
                 >
@@ -65,11 +67,13 @@
 <script lang="ts">
 export interface VoexModalProps {
   modelValue?: boolean;
+  keepMounted?: boolean;
   title?: string;
   width?: string | number;
   closable?: boolean;
   maskClosable?: boolean;
   centered?: boolean;
+  placement?: 'center' | 'left' | 'right';
   height?: string | number;
   busy?: boolean;
   closeDisabled?: boolean;
@@ -182,12 +186,14 @@ defineOptions({ inheritAttrs: false });
 
 const props = withDefaults(defineProps<VoexModalProps>(), {
   modelValue: false,
+  keepMounted: false,
   title: '',
   width: 420,
   height: 'auto',
   closable: true,
   maskClosable: true,
   centered: true,
+  placement: 'center',
   busy: false,
   closeDisabled: false,
 });
@@ -238,6 +244,14 @@ watch(
     modalStack.push(session);
     // showModal supplies the top layer, background inertness and native focus containment.
     dialog.showModal();
+    const openedSession = session;
+    // Retained drawers may finish becoming visible after showModal's native focus step.
+    nextTick(() => {
+      if (session !== openedSession || modalStack.at(-1) !== openedSession) return;
+      if (!dialog.contains(document.activeElement)) {
+        (getTabStops(dialog)[0] ?? dialog).focus({ preventScroll: true });
+      }
+    });
     updateViewport();
     window.visualViewport?.addEventListener('resize', updateViewport);
     window.visualViewport?.addEventListener('scroll', updateViewport);
@@ -254,7 +268,9 @@ const modalStyle = computed(() => ({
 }));
 
 const wrapperClass = computed(() => ({
-  'voex-modal-wrapper--centered': props.centered,
+  'voex-modal-wrapper--centered': props.placement === 'center' && props.centered,
+  'voex-modal-wrapper--left': props.placement === 'left',
+  'voex-modal-wrapper--right': props.placement === 'right',
 }));
 
 function handleClose() {
@@ -439,7 +455,61 @@ function handleMaskClick() {
     padding-bottom unquote('max(16px, env(safe-area-inset-bottom))')
     padding-left unquote('max(12px, env(safe-area-inset-left))')
 
+.voex-modal-mask--drawer
+  .voex-modal-wrapper
+    padding 0
+    align-items stretch
+    transform none
+
+    &--left
+      justify-content flex-start
+
+    &--right
+      justify-content flex-end
+
+  .voex-modal
+    max-width calc(100% - 40px)
+    border-radius 0
+    padding-left env(safe-area-inset-left)
+    padding-right env(safe-area-inset-right)
+    transition transform .25s ease
+
+  .voex-modal__header
+    min-height 56px
+    padding 6px 12px 6px 16px
+    padding-top unquote('max(6px, env(safe-area-inset-top))')
+    border-bottom 1px solid var(--color-border-primary)
+    gap 12px
+
+  .voex-modal__close
+    width 44px
+    height 44px
+    border-radius 50%
+
+    &:active
+      background var(--color-bg-translucent)
+
+  .voex-modal__body
+    display flex
+    flex-direction column
+    padding 0
+    padding-bottom env(safe-area-inset-bottom)
+    overflow hidden
+
+  &.voex-modal-enter-from, &.voex-modal-leave-to
+    .voex-modal-wrapper
+      transform none
+
+    .voex-modal-wrapper--left .voex-modal
+      transform translateX(-100%)
+
+    .voex-modal-wrapper--right .voex-modal
+      transform translateX(100%)
+
 @media (prefers-reduced-motion: reduce)
+  .voex-modal-mask--drawer .voex-modal
+    transition none
+
   .voex-modal-enter-active,
   .voex-modal-leave-active
     transition none

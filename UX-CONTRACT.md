@@ -13,8 +13,14 @@
 | CRUD               | src/composables/useCreateDocument.ts、src/composables/useDocumentPage.ts       | 后端 API.md                  | 创建后打开 / 删除后返回目录             | 浏览器目录→编辑            |
 | Scrollbar          | src/assets/style/main.css                                                      | DESIGN.md 与 theme.styl      | geometry only                           | 浏览器 computed style      |
 | Team form / action | src/components/team/team.styl、JoinTeamDialog.vue、ProjectPrivilegesDialog.vue | 本次团队方案、team-api.ts    | 申请 / 权限、沿用 VoexModal             | 错误、IME、焦点、窄屏      |
-| Download queue     | src/stores/download.ts、src/components/DownloadQueue.vue                       | 本次下载需求及附件 API       | 普通附件 / 分享附件，全局非模态浮层     | 进度、中止、去重、浏览器保存 |
+| Download queue     | src/stores/download.ts、src/components/DownloadQueue.vue                       | 本次下载需求及附件 API       | 普通附件 / 分享附件，附件底部内联区域     | 进度、中止、去重、浏览器保存 |
 | Select/Listbox     | 原生 select                                                                    | 浏览器/操作系统              | 团队选择、转让对象；接受平台 popup 外观 | label、键盘、窄屏          |
+
+## 编辑页手机模式
+
+`src/utils/platform.ts` 的 `isMobile` 是手机模式入口；桌面窄窗口不改变设备判断。`src/components/VoexDrawer.vue` 复用 VoexModal 的原生 dialog、焦点管理、遮罩关闭与滚动锁，`src/stores/drawer.ts` 保存互斥的 documents / attachments 状态。左侧文档目录、右侧文件列表仅在手机模式进入抽屉；关闭保留内容实例及目录展开和滚动状态；标题栏按钮通过 aria-expanded 表达状态。关闭、Escape、遮罩点击恢复入口焦点；抽屉内再次打开确认或预览时沿用原有弹窗栈。切换文档、离开页面关闭抽屉，取消未保存离开确认保留当前页面。
+
+手机隐藏格式工具栏，右侧文件列表保留文件选择上传入口，插入附件后关闭抽屉回到正文。桌面和手机的分享/导出统一使用标题栏右侧圆形图标按钮，有可访问名称、tooltip 和 busy 禁用状态；不改变分享权限与导出流程。
 
 ## 导航与数据
 
@@ -58,7 +64,7 @@
 
 ## 附件下载
 
-编辑页、分享页和上传调试页的附件下载统一推入全局 download store。左下角入口在所有路由常驻，新任务自动展开向上的下载列表；浮层不阻断页面操作，Tab 可访问，Escape/外部点击收起，Escape 返回入口焦点。已有 NotificationBar 负责重复下载和失败提示，进度与失败原因保留在列表，进行中的任务优先展示。
+编辑页、分享页和上传调试页的附件下载统一推入全局 download store。下载队列放在各附件区域底部，手机时随右侧文件抽屉显示，新任务自动展开内联下载列表；列表可独立滚动，Tab 可访问，Escape 收起列表并返回队列入口焦点；收起后 Escape 可继续关闭抽屉。已有 NotificationBar 负责重复下载和失败提示，进度与失败原因保留在列表，进行中的任务优先展示。
 
 最多并发 2 个传输，其他任务排队；排队、下载与交给浏览器期间按 hash 去重，结束或中止后可再次下载同一 hash。下载请求 timeout=0，使用独立 AbortController 中止；路由切换继续下载。总大小已知时显示百分比与字节数，未知时显示已接收字节与不定进度，不伪造百分比。
 

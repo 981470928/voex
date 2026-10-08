@@ -1,12 +1,12 @@
 <template>
   <aside
     class="attachment-panel"
-    :class="{ 'attachment-panel--drag-over': isDragging }"
+    :class="{ 'attachment-panel--drag-over': isDragging, 'attachment-panel--mobile': mobile }"
     @dragover.prevent="emit('update:isDragging', true)"
     @dragleave.prevent="emit('update:isDragging', false)"
     @drop.prevent="emit('drop', $event)"
   >
-    <div class="attachment-panel__header">
+    <div v-if="!mobile" class="attachment-panel__header">
       <h2 class="attachment-panel__title">
         <SvgIcon name="attachment" size="18px" />
         附件
@@ -15,6 +15,18 @@
         {{ attachments.length }}
       </span>
     </div>
+    <div v-else class="attachment-panel__tools">
+      <span>{{ attachments.length }} 个附件</span>
+      <button
+        type="button"
+        class="attachment-panel__upload"
+        :disabled="!canUpload || !activeDocKey"
+        @click="emit('upload')"
+      >
+        <SvgIcon name="cloud-upload" size="18px" />
+        添加附件
+      </button>
+    </div>
     <div class="attachment-panel__list">
       <div v-if="!activeDocKey" class="attachment-panel__empty">请先选择文档</div>
       <div
@@ -22,7 +34,8 @@
         class="attachment-panel__empty attachment-panel__empty--drop-hint"
       >
         <SvgIcon name="cloud-upload" size="40px" class="attachment-panel__empty-icon" />
-        <p>拖放文件到此处上传</p>
+        <p v-if="mobile">{{ canUpload ? '点击「添加附件」上传文件' : '暂无附件' }}</p>
+        <p v-else>拖放文件到此处上传</p>
       </div>
       <div
         v-for="file in attachments"
@@ -89,11 +102,13 @@
         </div>
       </div>
     </div>
+    <DownloadQueue />
   </aside>
 </template>
 
 <script setup lang="ts">
 import SvgIcon from '@/components/SvgIcon.vue';
+import DownloadQueue from '@/components/DownloadQueue.vue';
 import { computed } from 'vue';
 import type { FileInfo } from '@/service/api/document-api';
 import type { UploadItem } from '@/stores/upload';
@@ -103,9 +118,12 @@ const props = defineProps<{
   uploadingFiles: UploadItem[];
   activeDocKey: string;
   isDragging: boolean;
+  mobile?: boolean;
+  canUpload?: boolean;
 }>();
 
 const emit = defineEmits<{
+  upload: [];
   download: [file: FileInfo];
   insert: [file: FileInfo];
   preview: [file: FileInfo];
@@ -125,12 +143,64 @@ const pendingUploads = computed(() => {
   display flex
   flex-direction column
   width 280px
+  min-height 0
   background var(--color-bg-panel)
   border-left 1px solid var(--color-border-primary)
   transition background .2s
 
   &--drag-over
     background var(--color-accent-tint)
+
+  &--mobile
+    width 100%
+    height 100%
+    min-width 0
+    flex 1
+    border 0
+
+    .attachment-panel__download,
+    .attachment-panel__delete
+      width 40px
+      height 40px
+
+    .attachment-panel__insert
+      min-height 40px
+
+  &__tools
+    display flex
+    align-items center
+    justify-content space-between
+    gap 12px
+    padding 8px 16px
+    border-bottom 1px solid var(--color-border-primary)
+    flex-shrink 0
+    font-size 12px
+    color var(--color-text-tertiary)
+
+  &__upload
+    display inline-flex
+    align-items center
+    justify-content center
+    gap 6px
+    min-height 40px
+    padding 8px 12px
+    border 1px solid var(--color-border-secondary)
+    border-radius 8px
+    background var(--color-bg-secondary)
+    color var(--color-text-primary)
+    font-size 13px
+    cursor pointer
+
+    &:hover:not(:disabled)
+      background var(--color-bg-tertiary)
+
+    &:focus-visible
+      outline 2px solid var(--color-accent)
+      outline-offset 2px
+
+    &:disabled
+      opacity .45
+      cursor not-allowed
 
   &__header
     display flex
@@ -165,6 +235,7 @@ const pendingUploads = computed(() => {
 
   &__list
     flex 1
+    min-height 0
     overflow-y auto
     padding 8px
 
