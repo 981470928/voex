@@ -42,10 +42,12 @@ export function folderAncestors(folders: FolderInfo[], key?: string): FolderInfo
 }
 
 export function desktopLocation(project_key?: string, folder_key?: string, team_key?: string) {
+  const query = team_key ? { team_key } : undefined;
+  if (!project_key) return { name: 'recent', query };
   return {
     name: 'project',
-    params: { projectId: project_key ?? '', folderId: folder_key ?? '' },
-    query: team_key ? { team_key } : undefined,
+    params: { projectId: project_key, folderId: folder_key ?? '' },
+    query,
   };
 }
 

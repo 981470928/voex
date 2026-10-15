@@ -3,7 +3,7 @@ import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vu
 import { storeToRefs } from 'pinia';
 import { isAxiosError } from 'axios';
 import MilkdownEditor from '@/components/milkdown/MilkdownEditor.vue';
-import { listFiles, deleteAttachment } from '@/service/api/upload-api';
+import { listFiles, deleteAttachment, downloadFile } from '@/service/api/upload-api';
 import {
   getDocument,
   updateDocument,
@@ -13,7 +13,7 @@ import {
   type FileInfo,
 } from '@/service/api/document-api';
 import { getProjectTree, type ProjectTree } from '@/service/api/workspace-api';
-import { useFileUpload } from '@/utils/dom';
+import { FILE_ACCEPT, originalGetImportFiles } from '@/utils/dom';
 import { desktopLocation, formatTime } from '@/utils/workspace';
 import { errorMessage } from '@/utils/error';
 import { useUploadStore } from '@/stores/upload';
@@ -21,9 +21,13 @@ import { useDownloadStore } from '@/stores/download';
 import { usePreviewerStore } from '@/stores/previewer';
 import { useModalStore, ModalType } from '@/stores/modal';
 import { useNotificationStore } from '@/stores/notification';
+import { usePermissionStore } from '@/stores/permission';
+import { useTeamStore } from '@/stores/team';
 import { MessageType } from '@/constant/status';
 import { useConfirm } from './useConfirm';
 import { useCreateDocument } from './useCreateDocument';
+import { applyAIReview } from '@/service/api/ai-api';
+import type { DocumentSnapshot, ReviewSnapshot } from '@/agent/types';
 
 const AUTO_SAVE_DELAY = 2000;
 
@@ -45,6 +49,7 @@ export function useDocumentPage() {
   const saveError = ref('');
   const saveConflict = ref(false);
   const busy = ref(false);
+  const aiBusy = ref(false);
   const isDragging = ref(false);
   const editorRef = ref<InstanceType<typeof MilkdownEditor> | null>(null);
   const editorReady = ref(false);
@@ -52,17 +57,22 @@ export function useDocumentPage() {
   const savedContent = ref('');
   const modal = useModalStore();
   const notification = useNotificationStore();
+  const permission = usePermissionStore();
+  const teams = useTeamStore();
   const previewer = usePreviewerStore();
   const uploadStore = useUploadStore();
   const downloadStore = useDownloadStore();
   const { uploadingFiles } = storeToRefs(uploadStore);
-  const { selectFiles } = useFileUpload();
   const { confirm } = useConfirm();
   const { creating, openCreateDocument } = useCreateDocument();
   const activeDocKey = computed(() => activeDoc.value?.file_key ?? '');
   const editorContent = computed(() => activeDoc.value?.file_content ?? '');
-  const canWrite = computed(() => activeDoc.value?.permissions.write === true);
-  const canShare = computed(() => activeDoc.value?.permissions.share === true);
+  const canWrite = computed(
+    () => permission.document(activeDoc.value, projectTree.value?.project).write
+  );
+  const canShare = computed(
+    () => permission.document(activeDoc.value, projectTree.value?.project).share
+  );
   const dirty = computed(() => editorReady.value && currentContent.value !== savedContent.value);
   let controller: AbortController | undefined;
   let generation = 0;
@@ -83,7 +93,8 @@ export function useDocumentPage() {
       editorReady.value &&
       canWrite.value &&
       !saveError.value &&
-      !busy.value
+      !busy.value &&
+      !aiBusy.value
     );
   }
 
@@ -192,7 +203,7 @@ export function useDocumentPage() {
   }
 
   async function mayLeave() {
-    if (saving.value) return false;
+    if (saving.value || aiBusy.value) return false;
     if (!hasUnsavedChanges()) return true;
     if (!navigationCheck) {
       clearTimeout(autoSaveTimer);
@@ -223,7 +234,7 @@ export function useDocumentPage() {
   );
 
   function beforeUnload(event: BeforeUnloadEvent) {
-    if (!hasUnsavedChanges() && !saving.value) return;
+    if (!hasUnsavedChanges() && !saving.value && !aiBusy.value) return;
     event.preventDefault();
     event.returnValue = '';
   }
@@ -266,6 +277,118 @@ export function useDocumentPage() {
     if (current === generation) projectTree.value = next;
   }
 
+  async function prepareAIDocument(): Promise<DocumentSnapshot> {
+    if (
+      !activeDoc.value ||
+      !editorReady.value ||
+      loading.value ||
+      saving.value ||
+      busy.value ||
+      aiBusy.value
+    )
+      throw new Error('请等待文档加载或保存完成');
+    if (saveError.value || hasUnsavedChanges())
+      throw new Error('请先等待当前编辑保存完成，再发送 AI 指令');
+    const doc = activeDoc.value;
+    // Capturing context is read-only, including when Milkdown normalizes stored Markdown.
+    // Only the explicit apply action may persist an AI draft.
+    return {
+      file_key: doc.file_key,
+      file_name: doc.file_name,
+      project_key: doc.project_key,
+      folder_key: doc.folder_key,
+      content: doc.file_content ?? '',
+      revision: doc.revision,
+      writable: canWrite.value,
+    };
+  }
+
+  async function applyDocumentReview(review: ReviewSnapshot) {
+    if (
+      !activeDoc.value ||
+      !editorReady.value ||
+      !canWrite.value ||
+      saving.value ||
+      busy.value ||
+      aiBusy.value
+    )
+      throw new Error('当前文档不可应用修改，请等待保存完成');
+    if (hasUnsavedChanges() || saveError.value)
+      throw new Error('当前正文还有未保存的修改，请先完成保存后再审阅');
+    const key = activeDocKey.value;
+    const change = review.changes.find((item) => item.kind === 'update' && item.file_key === key);
+    if (
+      change &&
+      (activeDoc.value.revision !== change.revision ||
+        activeDoc.value.file_name !== change.before_name ||
+        (activeDoc.value.file_content ?? '') !== change.before_content)
+    )
+      throw new Error('文档已发生变化，请基于最新内容重新生成建议；旧建议仍可查看');
+    for (const item of review.changes) {
+      if (
+        item.project_key !== activeDoc.value.project_key ||
+        item.folder_key !== activeDoc.value.folder_key
+      )
+        throw new Error('请回到生成该建议的文件夹后再应用');
+      if (item.kind === 'update' && item.file_key !== key)
+        throw new Error('请回到生成该建议的文档后再应用');
+      editorRef.value!.normalizeMarkdown(item.after_content);
+    }
+    aiBusy.value = true;
+    clearTimeout(autoSaveTimer);
+    pendingSave = undefined;
+    try {
+      const results = await applyAIReview(review);
+      review.status = 'applied';
+      if (disposed || activeDocKey.value !== key) return;
+      const result = results.find((item) => item.file_key === key);
+      if (results.some((item) => item.replayed)) {
+        // A previous attempt may have committed before its response was lost.
+        // Read the current server version instead of restoring that old snapshot over later edits.
+        try {
+          const latest = await getDocument(key);
+          if (disposed || activeDocKey.value !== key) return;
+          activeDoc.value = latest;
+          editorRef.value!.setMarkdown(latest.file_content ?? '');
+          currentContent.value = editorRef.value!.getMarkdown();
+          savedContent.value = currentContent.value;
+          failedSave = undefined;
+          saveError.value = '';
+        } catch {
+          saveError.value = '该审阅已应用，但最新正文同步失败，请重新加载文档。';
+          saveConflict.value = true;
+          throw new Error(saveError.value);
+        }
+      } else if (change && result) {
+        activeDoc.value!.file_name = result.file_name;
+        activeDoc.value!.file_content = change.after_content;
+        activeDoc.value!.revision = result.revision;
+        try {
+          editorRef.value!.setMarkdown(change.after_content);
+        } catch {
+          saveError.value = 'AI 修改已保存，但编辑器同步失败。请重新加载文档。';
+          saveConflict.value = true;
+          throw new Error(saveError.value);
+        }
+        currentContent.value = editorRef.value!.getMarkdown();
+        savedContent.value = currentContent.value;
+        failedSave = undefined;
+        saveError.value = '';
+      }
+      notification.show('AI 修改已应用并保存', 'success');
+      teams.invalidateProjects();
+      // Refresh failure must not mislabel an already committed review as failed.
+      try {
+        await refreshTree();
+      } catch {
+        notification.show('修改已保存，目录刷新失败，请稍后刷新', 'error');
+      }
+    } finally {
+      aiBusy.value = false;
+      handleEditorActivity();
+    }
+  }
+
   function retrySave() {
     if (saveConflict.value || saving.value || !canWrite.value) return;
     saveError.value = '';
@@ -292,7 +415,7 @@ export function useDocumentPage() {
   }
 
   function handleCreateDoc() {
-    if (!canWrite.value || !activeDoc.value) return;
+    if (!permission.folder(projectTree.value?.project).write || !activeDoc.value) return;
     openCreateDocument({
       project_key: activeDoc.value.project_key,
       folder_key: activeDoc.value.folder_key,
@@ -300,7 +423,7 @@ export function useDocumentPage() {
   }
 
   function handleRenameDoc(doc: DocumentSummary) {
-    if (!canWrite.value || busy.value) return;
+    if (!permission.document(doc, projectTree.value?.project).rename || busy.value) return;
     modal.showModal(ModalType.INPUT_DIALOG, {
       title: '重命名文件',
       tips: '文件名称',
@@ -316,23 +439,37 @@ export function useDocumentPage() {
   }
 
   async function handleDeleteDoc(doc: DocumentSummary) {
-    if (!canWrite.value || busy.value || saving.value) return;
+    if (!permission.document(doc, projectTree.value?.project).remove || busy.value || saving.value)
+      return;
     busy.value = true;
+    const current = generation;
+    const location = route.fullPath;
     try {
       const accepted = await confirm({
-        type: MessageType.ERROR,
-        title: '删除文件',
-        content: `删除「${doc.file_name}」及其附件关联？未保存的内容也将丢失，此操作无法撤销。`,
-        confirmText: '删除',
+        type: MessageType.WARNING,
+        title: '将文件移入回收站',
+        content: `将「${doc.file_name}」移入回收站？已保存的正文和附件关联会保留，可在 30 天保留期限内恢复。${activeDocKey.value === doc.file_key && hasUnsavedChanges() ? '本页尚未保存的修改会丢失。' : ''}`,
+        confirmText: '移入回收站',
       });
-      if (!accepted) return;
-      await deleteDocument(doc.file_key);
-      notification.show('文件已删除', 'success');
+      if (!accepted || disposed || current !== generation || route.fullPath !== location) return;
+      const result = await deleteDocument(doc.file_key);
+      if (!result.success) throw new Error('移入回收站失败，请刷新后重试');
+      teams.invalidateProjects();
+      if (disposed || current !== generation) return;
+      notification.show('文件已移入回收站', 'success');
       if (activeDocKey.value === doc.file_key) {
-        editorReady.value = false;
-        await router.push(
-          desktopLocation(doc.project_key, doc.folder_key, projectTree.value?.project.team_key)
+        const destination = desktopLocation(
+          doc.project_key,
+          doc.folder_key,
+          projectTree.value?.project.team_key
         );
+        clearSaveQueue();
+        editorReady.value = false;
+        activeDoc.value = null;
+        attachments.value = [];
+        generation++;
+        attachmentGeneration++;
+        await router.push(destination);
       } else await refreshTree();
     } catch (cause) {
       notification.show(errorMessage(cause), 'error', 0);
@@ -390,7 +527,7 @@ export function useDocumentPage() {
     }
   }
 
-  async function uploadAttachments(files: FileList): Promise<FileInfo[]> {
+  async function uploadAttachments(files: FileList | File[]): Promise<FileInfo[]> {
     const key = activeDocKey.value;
     if (!key || !canWrite.value) return [];
     const uploaded = await uploadStore.uploadFiles(files, key);
@@ -405,9 +542,17 @@ export function useDocumentPage() {
   async function triggerFileUpload(): Promise<FileInfo[]> {
     const key = activeDocKey.value;
     if (!key || !canWrite.value) return [];
-    const files = await selectFiles();
-    if (!files || key !== activeDocKey.value) return [];
+    const files = await originalGetImportFiles(FILE_ACCEPT.ALL);
+    if (!files.length || key !== activeDocKey.value) return [];
     return uploadAttachments(files);
+  }
+
+  function loadImage(
+    hash: string,
+    signal: AbortSignal,
+    documentKey = activeDocKey.value
+  ): Promise<Blob> {
+    return downloadFile(documentKey, hash, { signal });
   }
 
   async function handleDrop(event: DragEvent) {
@@ -447,6 +592,9 @@ export function useDocumentPage() {
     saveError,
     saveConflict,
     busy,
+    aiBusy,
+    prepareAIDocument,
+    applyDocumentReview,
     dirty,
     canWrite,
     canShare,
@@ -468,6 +616,8 @@ export function useDocumentPage() {
     handlePreview,
     handleDeleteAttachment,
     triggerFileUpload,
+    importImages: uploadAttachments,
+    loadImage,
     handleDrop,
     loadAttachments,
     loadDocument,

@@ -3,6 +3,7 @@ import { defineStore } from 'pinia';
 import { isAxiosError, isCancel } from 'axios';
 import { downloadFile, type DownloadOptions } from '@/service/api/upload-api';
 import { downloadSharedAttachment } from '@/service/api/share-api';
+import { downloadRecentAttachment } from '@/service/api/recent-api';
 import { useNotificationStore } from './notification';
 
 export type DownloadStatus =
@@ -18,7 +19,8 @@ export interface DownloadItem {
   error: string;
 }
 
-type DownloadSource = { kind: 'document'; fileKey: string } | { kind: 'share'; token: string };
+type DownloadSource =
+  { kind: 'document' | 'recent'; fileKey: string } | { kind: 'share'; token: string };
 
 interface DownloadTask {
   item: DownloadItem;
@@ -104,7 +106,9 @@ export const useDownloadStore = defineStore('download', () => {
       blob =
         source.kind === 'share'
           ? await downloadSharedAttachment(source.token, item.hash, options)
-          : await downloadFile(source.fileKey, item.hash, options);
+          : source.kind === 'recent'
+            ? await downloadRecentAttachment(source.fileKey, item.hash, options)
+            : await downloadFile(source.fileKey, item.hash, options);
       // An aborted/replaced request must never trigger a browser download.
       if (controller.signal.aborted || disposed) return;
       item.loaded = blob.size;

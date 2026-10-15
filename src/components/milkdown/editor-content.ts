@@ -1,4 +1,4 @@
-import { editorViewOptionsCtx } from '@milkdown/kit/core';
+import { editorViewCtx, editorViewOptionsCtx } from '@milkdown/kit/core';
 import type { Ctx, MilkdownPlugin } from '@milkdown/kit/ctx';
 import { uploadConfig } from '@milkdown/kit/plugin/upload';
 import { listItemSchema } from '@milkdown/kit/preset/commonmark';
@@ -10,74 +10,36 @@ import {
   type NodeViewConstructor,
 } from '@milkdown/kit/prose/view';
 import { $prose, $view } from '@milkdown/kit/utils';
+import { createResizableImages } from './image-resize';
+import { FILE_UPLOAD_MESSAGE, hasOtherFiles } from './editor-paste';
+import type { createImageImport } from './image-import';
+import type { Node as ProseMirrorNode } from '@milkdown/kit/prose/model';
 
 interface EditorContentOptions {
   readonly: () => boolean;
   onError: (message: string) => void;
+  imageImport: ReturnType<typeof createImageImport>;
+  onAttachment: (view: EditorView, pos: number, node: ProseMirrorNode) => void;
 }
 
 export interface EditorContent {
   plugins: MilkdownPlugin[];
   configure: (ctx: Ctx) => void;
   readonlyChanged: () => void;
+  replaceSavedDocument: (ctx: Ctx, document: ProseMirrorNode) => void;
   destroy: () => void;
-}
-
-const FILE_UPLOAD_MESSAGE = '请通过添加附件上传文件';
-
-function hasOtherFiles(files: FileList | undefined): boolean {
-  return !!files && Array.from(files).some((file) => !file.type.startsWith('image/'));
 }
 
 export function createEditorContent(options: EditorContentOptions): EditorContent {
   const guardKey = new PluginKey('voex-editor-content');
-  const readers = new Set<FileReader>();
   const taskRefreshers = new Set<() => void>();
   let currentView: EditorView | null = null;
   let disposed = false;
   let readonlyEpoch = 0;
+  let replacingSavedDocument = false;
+  const images = createResizableImages(options);
 
   const isReadonly = () => disposed || options.readonly();
-
-  function cancelReaders() {
-    Array.from(readers).forEach((reader) => reader.abort());
-  }
-
-  function readImage(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      readers.add(reader);
-
-      const cleanup = () => {
-        readers.delete(reader);
-        reader.onload = null;
-        reader.onerror = null;
-        reader.onabort = null;
-      };
-
-      reader.onload = () => {
-        const result = reader.result;
-        cleanup();
-        if (typeof result === 'string') resolve(result);
-        else reject(new Error('图片读取失败，请重试'));
-      };
-      reader.onerror = () => {
-        cleanup();
-        reject(new Error('图片读取失败，请重试'));
-      };
-      reader.onabort = () => {
-        cleanup();
-        reject(new Error('图片读取已取消'));
-      };
-
-      try {
-        reader.readAsDataURL(file);
-      } catch (cause) {
-        cleanup();
-        reject(cause);
-      }
-    });
-  }
 
   const createListItemView: NodeViewConstructor = (initialNode, view, getPos) => {
     let node = initialNode;
@@ -156,31 +118,15 @@ export function createEditorContent(options: EditorContentOptions): EditorConten
       new Plugin({
         key: guardKey,
         // editable 只约束用户输入，异步操作和外部命令还需拦截 transaction。
-        filterTransaction: (transaction) => !isReadonly() || !transaction.docChanged,
+        filterTransaction: (transaction) =>
+          !isReadonly() || !transaction.docChanged || (!disposed && replacingSavedDocument),
         props: {
           handleDOMEvents: {
-            paste: (_view, event) => {
-              if (!isReadonly()) return false;
-              event.preventDefault();
-              return true;
-            },
             drop: (_view, event) => {
               if (!isReadonly()) return false;
               event.preventDefault();
               return true;
             },
-          },
-          handlePaste(view, event, slice) {
-            if (isReadonly()) return true;
-            const data = event.clipboardData;
-            if (!hasOtherFiles(data?.files)) return false;
-
-            options.onError(FILE_UPLOAD_MESSAGE);
-            // 拒绝整批混合文件，但保留剪贴板同时携带的正文。
-            if (data?.getData('text/plain') || data?.getData('text/html')) {
-              view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
-            }
-            return true;
           },
           handleDrop(view, event, _slice, moved) {
             if (isReadonly()) return true;
@@ -214,6 +160,7 @@ export function createEditorContent(options: EditorContentOptions): EditorConten
   );
 
   function configure(ctx: Ctx) {
+    images.configure(ctx);
     ctx.update(editorViewOptionsCtx, (config) => ({
       ...config,
       dispatchTransaction(this: EditorView, transaction) {
@@ -234,7 +181,7 @@ export function createEditorContent(options: EditorContentOptions): EditorConten
         dom.textContent = '正在导入图片…';
         return Decoration.widget(pos, dom, spec);
       },
-      uploader: async (files, schema) => {
+      uploader: async (files) => {
         if (isReadonly()) return [];
         if (hasOtherFiles(files)) {
           options.onError(FILE_UPLOAD_MESSAGE);
@@ -243,13 +190,8 @@ export function createEditorContent(options: EditorContentOptions): EditorConten
 
         const epoch = readonlyEpoch;
         try {
-          const imageType = schema.nodes.image;
-          if (!imageType) throw new Error('图片功能尚未就绪');
-          const nodes = await Promise.all(
-            Array.from(files).map(async (file) =>
-              imageType.create({ src: await readImage(file), alt: file.name })
-            )
-          );
+          if (!currentView) return [];
+          const nodes = await options.imageImport.importImages(currentView, Array.from(files));
           // 权限先关闭再恢复时，旧操作也不能继续写入。
           return isReadonly() || epoch !== readonlyEpoch ? [] : nodes;
         } catch (cause) {
@@ -265,7 +207,7 @@ export function createEditorContent(options: EditorContentOptions): EditorConten
 
   function readonlyChanged() {
     readonlyEpoch++;
-    cancelReaders();
+    images.readonlyChanged();
     taskRefreshers.forEach((refresh) => refresh());
     if (!disposed && currentView && !currentView.isDestroyed) {
       currentView.dispatch(currentView.state.tr.setMeta(guardKey, true));
@@ -276,15 +218,29 @@ export function createEditorContent(options: EditorContentOptions): EditorConten
     if (disposed) return;
     disposed = true;
     readonlyEpoch++;
-    cancelReaders();
     taskRefreshers.clear();
+    images.destroy();
     currentView = null;
   }
 
+  function replaceSavedDocument(ctx: Ctx, document: ProseMirrorNode) {
+    if (disposed || !currentView || currentView.isDestroyed) throw new Error('编辑器已关闭');
+    const view = ctx.get(editorViewCtx);
+    // Only this synchronous host save acknowledgement can cross the temporary readonly lock.
+    // Asynchronous uploads, paste handlers and ordinary user transactions remain blocked.
+    replacingSavedDocument = true;
+    try {
+      view.dispatch(view.state.tr.replaceWith(0, view.state.doc.content.size, document.content));
+    } finally {
+      replacingSavedDocument = false;
+    }
+  }
+
   return {
-    plugins: [guard, $view(listItemSchema.node, () => createListItemView)],
+    plugins: [guard, $view(listItemSchema.node, () => createListItemView), ...images.plugins],
     configure,
     readonlyChanged,
+    replaceSavedDocument,
     destroy,
   };
 }

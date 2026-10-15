@@ -26,7 +26,6 @@ const router = createRouter({
       meta: { anonymous: true },
       component: () => import('@/views/auth/RegisterPage.vue'),
     },
-    { path: '/profile', name: 'profile', component: () => import('@/views/auth/ProfilePage.vue') },
     { path: '/join', name: 'join', component: () => import('@/views/team/JoinTeamPage.vue') },
     {
       path: '/share',
@@ -36,17 +35,26 @@ const router = createRouter({
     },
     {
       path: '/',
-      redirect: '/home',
+      redirect: '/home/recent',
     },
     {
       path: '/home',
       name: 'home',
       component: () => import('@/views/home/Home.vue'),
       children: [
-        { path: '', name: 'home-index', redirect: { name: 'project' } },
-        { path: 'teams', name: 'teams', component: () => import('@/views/team/TeamPage.vue') },
         {
-          path: 'project/:projectId?/:folderId?',
+          path: '',
+          redirect: { name: 'recent' },
+        },
+        {
+          path: 'profile',
+          name: 'profile',
+          component: () => import('@/views/auth/ProfilePage.vue'),
+        },
+        { path: 'teams', name: 'teams', component: () => import('@/views/team/TeamPage.vue') },
+        { path: 'trash', name: 'trash', component: () => import('@/views/home/TrashPage.vue') },
+        {
+          path: 'project/:projectId/:folderId?',
           name: 'project',
           component: () => import('@/views/home/ProjectPage.vue'),
         },
@@ -58,11 +66,16 @@ const router = createRouter({
       ],
     },
     {
+      path: '/recent/:file_key',
+      name: 'recent-file',
+      component: () => import('@/views/share/SharedFilePage.vue'),
+    },
+    {
       path: '/edit/:file_key',
       name: 'edit',
       component: () => import('@/views/edit/EditPage.vue'),
     },
-    { path: '/:pathMatch(.*)*', redirect: '/home' },
+    { path: '/:pathMatch(.*)*', redirect: '/home/recent' },
   ],
 });
 

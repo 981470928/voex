@@ -28,7 +28,7 @@
             :nodes="node.children"
             :expanded="expanded"
             :active-key="activeKey"
-            :writable="writable"
+            :project="project"
             :busy="busy"
             nested
             @toggle="$emit('toggle', $event)"
@@ -53,7 +53,7 @@
           }}</span>
         </RouterLink>
         <button
-          :disabled="!writable || busy"
+          :disabled="!permission.document(node.document, project).rename || busy"
           :aria-label="`重命名${node.document.file_name}`"
           title="重命名"
           @click="$emit('rename', node.document)"
@@ -62,9 +62,9 @@
         </button>
         <button
           class="project-tree__delete"
-          :disabled="!writable || busy"
-          :aria-label="`删除${node.document.file_name}`"
-          title="删除"
+          :disabled="!permission.document(node.document, project).remove || busy"
+          :aria-label="`将${node.document.file_name}移入回收站`"
+          title="移入回收站"
           @click="$emit('delete', node.document)"
         >
           <SvgIcon name="trash" :size="14" />
@@ -78,11 +78,15 @@
 import SvgIcon from '@/components/SvgIcon.vue';
 import type { DocumentSummary } from '@/service/api/document-api';
 import type { DirectoryNode } from '@/utils/workspace';
+import type { ProjectInfo } from '@/service/api/workspace-api';
+import { usePermissionStore } from '@/stores/permission';
+
+const permission = usePermissionStore();
 defineProps<{
   nodes: DirectoryNode[];
   expanded: Set<string>;
   activeKey: string;
-  writable: boolean;
+  project?: ProjectInfo;
   busy?: boolean;
   nested?: boolean;
 }>();

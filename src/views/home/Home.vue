@@ -14,7 +14,7 @@
               :is="Component"
               :key="
                 route.name === 'project'
-                  ? `project:${route.params.projectId || ''}:${route.query.team_key || ''}`
+                  ? `${route.name}:${route.params.projectId || ''}:${route.query.team_key || ''}`
                   : route.name
               "
             />

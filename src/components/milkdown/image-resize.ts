@@ -1,0 +1,754 @@
+import { remarkCtx, remarkPluginsCtx } from '@milkdown/kit/core';
+import type { Ctx, MilkdownPlugin } from '@milkdown/kit/ctx';
+import { imageSchema } from '@milkdown/kit/preset/commonmark';
+import type { Node as ProseMirrorNode } from '@milkdown/kit/prose/model';
+import { closeHistory } from '@milkdown/kit/prose/history';
+import { NodeSelection } from '@milkdown/kit/prose/state';
+import type { NodeView, NodeViewConstructor } from '@milkdown/kit/prose/view';
+import type { MarkdownNode, RemarkPlugin } from '@milkdown/kit/transformer';
+import { $view } from '@milkdown/kit/utils';
+import { imageAttachmentHash, type createImageImport } from './image-import';
+import type { EditorView } from '@milkdown/kit/prose/view';
+
+const MIN_WIDTH = 16;
+const MAX_WIDTH = 10000;
+let imageViewId = 0;
+let fragmentId = 0;
+type ImageAlignment = 'left' | 'center' | 'right';
+const ALIGNMENT_STYLES: Record<ImageAlignment, string> = {
+  left: 'display: block; margin-left: 0; margin-right: auto;',
+  center: 'display: block; margin-left: auto; margin-right: auto;',
+  right: 'display: block; margin-left: auto; margin-right: 0;',
+};
+
+function parseAlignment(value: unknown): ImageAlignment | null {
+  return value === 'left' || value === 'center' || value === 'right' ? value : null;
+}
+
+type ImageMarkdownNode = MarkdownNode & {
+  url?: string;
+  alt?: string;
+  title?: string;
+  width?: number | null;
+  alignment?: ImageAlignment | null;
+};
+
+interface ImageAttrs {
+  src: string;
+  alt: string;
+  title: string;
+  width: number | null;
+  alignment: ImageAlignment | null;
+}
+
+function parseWidth(value: unknown): number | null {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !/^\d+$/.test(value))) return null;
+  const width = Number(value);
+  return Number.isInteger(width) && width >= MIN_WIDTH && width <= MAX_WIDTH ? width : null;
+}
+
+function safeImageSource(src: string): boolean {
+  if (imageAttachmentHash(src)) return true;
+  if (
+    !src.trim() ||
+    Array.from(src).some(
+      (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127
+    )
+  )
+    return false;
+  if (/^data:/i.test(src)) return /^data:image\/[a-z0-9.+-]+(?:;[^,]*)?,/i.test(src);
+  try {
+    return ['http:', 'https:', 'blob:'].includes(new URL(src, window.location.href).protocol);
+  } catch {
+    return false;
+  }
+}
+
+function readImage(element: HTMLImageElement): ImageAttrs | null {
+  const src = element.getAttribute('src') ?? '';
+  if (!safeImageSource(src)) return null;
+  return {
+    src,
+    alt: element.getAttribute('alt') ?? '',
+    title: element.getAttribute('title') ?? '',
+    width: parseWidth(element.getAttribute('width')),
+    alignment: parseAlignment(element.getAttribute('data-align')),
+  };
+}
+
+function escapeAttribute(value: string): string {
+  return value.replace(
+    /[&<>"\r\n]/g,
+    (character) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        '\r': '&#13;',
+        '\n': '&#10;',
+      })[character]!
+  );
+}
+
+function imageLayoutAttrs(node: ProseMirrorNode) {
+  const width = parseWidth(node.attrs.width);
+  const alignment = parseAlignment(node.attrs.alignment);
+  return {
+    ...(width !== null && { width }),
+    ...(alignment && { 'data-align': alignment, style: ALIGNMENT_STYLES[alignment] }),
+  };
+}
+
+function serializeImage(node: ProseMirrorNode): string {
+  const layout = Object.entries(imageLayoutAttrs(node))
+    .map(([key, value]) => ` ${key}="${escapeAttribute(String(value))}"`)
+    .join('');
+  return `<img src="${escapeAttribute(node.attrs.src)}" alt="${escapeAttribute(node.attrs.alt)}" title="${escapeAttribute(node.attrs.title)}"${layout}>`;
+}
+
+// template 的内容不挂入页面；只读取图片属性，绝不渲染任意 HTML。
+function parseImageFragment(value: string, ctx: Ctx): MarkdownNode[] | null {
+  const template = document.createElement('template');
+  template.innerHTML = value;
+  const children = Array.from(template.content.childNodes);
+  if (
+    !children.every(
+      (child) => child.nodeType === Node.TEXT_NODE || child instanceof HTMLImageElement
+    )
+  )
+    return null;
+  const images = children
+    .filter((child): child is HTMLImageElement => child instanceof HTMLImageElement)
+    .map(readImage);
+  if (!images.length || images.some((image) => !image)) return null;
+  const prefix = `voex-image-fragment-${++fragmentId}:`;
+  let index = 0;
+  const markdown = value.replace(
+    /<img\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi,
+    () => `![image](${prefix}${index++})`
+  );
+  if (index !== images.length) return null;
+  const tree = ctx.get(remarkCtx).parse(markdown) as MarkdownNode;
+  const restore = (parent: MarkdownNode) => {
+    // 片段内 offset 不对应原始文档，不能交给后续按原文位置处理的插件。
+    delete parent.position;
+    parent.children = parent.children?.map((child) => {
+      delete child.position;
+      const image = child as ImageMarkdownNode;
+      if (image.type === 'image' && image.url?.startsWith(prefix)) {
+        const attrs = images[Number(image.url.slice(prefix.length))];
+        if (attrs)
+          return {
+            ...image,
+            url: attrs.src,
+            alt: attrs.alt,
+            title: attrs.title,
+            width: attrs.width,
+            alignment: attrs.alignment,
+          };
+      }
+      restore(child);
+      return child;
+    });
+  };
+  restore(tree);
+  return tree.children ?? null;
+}
+
+function restoreImageNodes(parent: MarkdownNode, ctx: Ctx): void {
+  if (!parent.children) return;
+  parent.children = parent.children.flatMap((child) => {
+    // CommonMark 会将独立 HTML 图片包装成段落；多张图片或软换行也要完整恢复。
+    const html =
+      child.type === 'paragraph' && child.children?.length === 1 ? child.children[0] : child;
+    if (html?.type === 'html' && typeof html.value === 'string') {
+      const blocks = parseImageFragment(html.value, ctx);
+      if (blocks) {
+        if (child.type === 'paragraph' || ['root', 'blockquote', 'listItem'].includes(parent.type))
+          return blocks;
+        if (blocks.every((block) => block.type === 'paragraph'))
+          return blocks.flatMap((block) => block.children ?? []);
+      }
+    }
+    restoreImageNodes(child, ctx);
+    return [child];
+  });
+}
+
+export function createResizableImages(options: {
+  readonly: () => boolean;
+  imageImport: ReturnType<typeof createImageImport>;
+  onAttachment: (view: EditorView, pos: number, node: ProseMirrorNode) => void;
+}) {
+  const refreshers = new Set<() => void>();
+  const cancellers = new Set<() => void>();
+  let disposed = false;
+
+  const createView: NodeViewConstructor = (initialNode, view, getPos): NodeView => {
+    const document = view.dom.ownerDocument;
+    const window = document.defaultView!;
+    let node = initialNode;
+    let selected = false;
+    let dismissed = false;
+    let failed = false;
+    let loading = false;
+    let source: string | null = null;
+    let sourceVersion = 0;
+    let destroyed = false;
+    let composing = false;
+    let compositionEndedAt = -Infinity;
+    let watching = false;
+    let drag:
+      | {
+          pointerId: number;
+          startX: number;
+          startY: number;
+          startWidth: number;
+          ratio: number;
+          horizontal: number;
+          width: number;
+          maxWidth: number;
+        }
+      | undefined;
+    const canEdit = () => !disposed && !destroyed && !view.isDestroyed && !options.readonly();
+    const dom = document.createElement('span');
+    dom.className = 'milkdown-editor__image';
+    dom.contentEditable = 'false';
+    const image = document.createElement('img');
+    image.className = 'milkdown-editor__image-media';
+    const fallback = document.createElement('span');
+    fallback.className = 'milkdown-editor__image-error';
+    fallback.textContent = '图片加载失败';
+    fallback.hidden = true;
+    const handle = document.createElement('button');
+    handle.type = 'button';
+    handle.className = 'milkdown-editor__image-handle';
+    handle.title = '拖动等比例缩放，或用左右方向键调整宽度';
+    handle.setAttribute('aria-label', '等比例调整图片大小');
+    const controls = document.createElement('span');
+    controls.className = 'milkdown-editor__image-controls';
+    controls.setAttribute('role', 'group');
+    controls.setAttribute('aria-label', '图片尺寸与对齐');
+    const label = document.createElement('label');
+    label.className = 'milkdown-editor__image-label';
+    label.textContent = '宽度';
+    const input = document.createElement('input');
+    input.id = `voex-image-width-${++imageViewId}`;
+    input.type = 'number';
+    input.inputMode = 'numeric';
+    input.min = String(MIN_WIDTH);
+    input.max = String(MAX_WIDTH);
+    input.step = '1';
+    input.setAttribute('aria-label', '图片宽度（像素）');
+    label.htmlFor = input.id;
+    const unit = document.createElement('span');
+    unit.textContent = 'px';
+    label.append(input, unit);
+    const apply = document.createElement('button');
+    apply.type = 'button';
+    apply.textContent = '应用';
+    apply.onmousedown = (event) => event.preventDefault();
+    const reset = document.createElement('button');
+    reset.type = 'button';
+    reset.textContent = '原始尺寸';
+    reset.onmousedown = (event) => event.preventDefault();
+    const alignmentGroup = document.createElement('span');
+    alignmentGroup.className = 'milkdown-editor__image-alignment';
+    alignmentGroup.setAttribute('role', 'group');
+    alignmentGroup.setAttribute('aria-label', '图片对齐');
+    const alignmentButtons = (
+      [
+        ['left', '左对齐'],
+        ['center', '居中'],
+        ['right', '右对齐'],
+      ] as const
+    ).map(([alignment, text]) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = text;
+      button.onmousedown = (event) => event.preventDefault();
+      button.onclick = () => commit({ alignment });
+      alignmentGroup.append(button);
+      return { alignment, button };
+    });
+    const error = document.createElement('span');
+    error.id = `${input.id}-error`;
+    error.className = 'milkdown-editor__image-validation';
+    error.setAttribute('role', 'alert');
+    error.hidden = true;
+    const attachment = document.createElement('button');
+    attachment.type = 'button';
+    attachment.textContent = '显示为附件';
+    attachment.onmousedown = (event) => event.preventDefault();
+    attachment.onclick = () => {
+      const pos = getPos();
+      if (canEdit() && pos !== undefined) options.onAttachment(view, pos, node);
+    };
+    controls.append(label, apply, reset, alignmentGroup, attachment, error);
+    dom.append(image, fallback, handle, controls);
+
+    function positionControls() {
+      if (!selected || !canEdit() || dismissed || drag) {
+        controls.hidden = true;
+        return;
+      }
+      const rect = dom.getBoundingClientRect();
+      const viewport = window.visualViewport;
+      let left = viewport?.offsetLeft ?? 0,
+        top = viewport?.offsetTop ?? 0,
+        right = left + (viewport?.width ?? document.documentElement.clientWidth),
+        bottom = top + (viewport?.height ?? window.innerHeight);
+      for (let parent = dom.parentElement; parent; parent = parent.parentElement) {
+        const style = window.getComputedStyle(parent);
+        const bounds = parent.getBoundingClientRect();
+        if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) {
+          top = Math.max(top, bounds.top);
+          bottom = Math.min(bottom, bounds.bottom);
+        }
+        if (/(auto|scroll|hidden|clip)/.test(style.overflowX)) {
+          left = Math.max(left, bounds.left);
+          right = Math.min(right, bounds.right);
+        }
+      }
+      const toolbar = view.dom
+        .closest('.milkdown-editor')
+        ?.querySelector('.milkdown-editor__toolbar');
+      if (toolbar?.getClientRects().length)
+        top = Math.max(top, toolbar.getBoundingClientRect().bottom);
+      if (rect.bottom <= top || rect.top >= bottom || rect.right <= left || rect.left >= right) {
+        controls.hidden = true;
+        return;
+      }
+      controls.hidden = false;
+      controls.style.maxWidth = `${Math.max(0, right - left - 12)}px`;
+      const height = controls.getBoundingClientRect().height;
+      const width = controls.getBoundingClientRect().width;
+      controls.style.left = `${Math.max(left + 6, Math.min(rect.left, right - width - 6))}px`;
+      const above = rect.top - height - 8;
+      controls.style.top = `${Math.max(top + 6, Math.min(above >= top + 6 ? above : rect.bottom + 8, bottom - height - 6))}px`;
+    }
+
+    const observer = new ResizeObserver(() => {
+      refreshInput();
+      positionControls();
+    });
+    function watchPosition(enabled: boolean) {
+      if (watching === enabled) return;
+      watching = enabled;
+      if (enabled) {
+        window.addEventListener('scroll', positionControls, true);
+        window.addEventListener('resize', positionControls);
+        window.visualViewport?.addEventListener('resize', positionControls);
+        window.visualViewport?.addEventListener('scroll', positionControls);
+        observer.observe(dom);
+      } else {
+        window.removeEventListener('scroll', positionControls, true);
+        window.removeEventListener('resize', positionControls);
+        window.visualViewport?.removeEventListener('resize', positionControls);
+        window.visualViewport?.removeEventListener('scroll', positionControls);
+        observer.disconnect();
+      }
+    }
+
+    function refreshInput() {
+      if (document.activeElement !== input && !composing)
+        input.value = String(
+          parseWidth(node.attrs.width) ?? Math.round(image.getBoundingClientRect().width)
+        );
+    }
+
+    function refresh() {
+      const editable = canEdit();
+      dom.tabIndex = editable ? 0 : -1;
+      dom.setAttribute(
+        'aria-label',
+        editable ? `${node.attrs.alt || '图片'}，按 Enter 调整大小` : node.attrs.alt || '图片'
+      );
+      dom.classList.toggle('milkdown-editor__image--selected', selected && editable && !dismissed);
+      dom.classList.toggle('milkdown-editor__image--resizing', Boolean(drag));
+      dom.style.width = node.attrs.width ? `${node.attrs.width}px` : '';
+      const alignment = parseAlignment(node.attrs.alignment);
+      if (alignment) dom.dataset.align = alignment;
+      else delete dom.dataset.align;
+      alignmentButtons.forEach(({ alignment: value, button }) => {
+        button.setAttribute('aria-pressed', String(alignment === value));
+        button.disabled = !editable;
+      });
+      image.alt = node.attrs.alt;
+      image.title = node.attrs.title;
+      const src = safeImageSource(node.attrs.src) ? node.attrs.src : '';
+      attachment.hidden = !imageAttachmentHash(src);
+      attachment.disabled = !editable;
+      if (source !== src) {
+        source = src;
+        const version = ++sourceVersion;
+        failed = !src;
+        loading = !!src;
+        image.removeAttribute('src');
+        fallback.textContent = src ? '正在加载图片…' : '图片加载失败';
+        fallback.hidden = false;
+        if (src)
+          void options.imageImport
+            .resolveSource(src)
+            .then((url) => {
+              if (destroyed || version !== sourceVersion) return;
+              image.src = url;
+            })
+            .catch(() => {
+              if (destroyed || version !== sourceVersion) return;
+              failed = true;
+              loading = false;
+              fallback.textContent = '图片加载失败';
+              refresh();
+            });
+      }
+      image.hidden = failed || loading;
+      fallback.hidden = !failed && !loading;
+      const loaded = !failed && image.complete && image.naturalWidth > 0;
+      handle.hidden = !selected || !editable || dismissed || !loaded;
+      input.disabled = apply.disabled = !editable || !loaded;
+      reset.disabled = !editable || parseWidth(node.attrs.width) === null;
+      refreshInput();
+      watchPosition(selected && editable && !dismissed);
+      positionControls();
+    }
+
+    function clearError() {
+      error.hidden = true;
+      input.removeAttribute('aria-invalid');
+      input.removeAttribute('aria-describedby');
+    }
+    function selectImage(focus = true) {
+      const pos = getPos();
+      if (!canEdit() || pos === undefined) return;
+      dismissed = false;
+      view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)));
+      if (focus) view.focus();
+      refresh();
+    }
+
+    function commit(attrs: { width?: number | null; alignment?: ImageAlignment }, focus = true) {
+      const pos = getPos();
+      if (!canEdit() || pos === undefined) return;
+      const current = view.state.doc.nodeAt(pos);
+      if (current?.type !== node.type) return;
+      clearError();
+      if (Object.entries(attrs).some(([key, value]) => current.attrs[key] !== value)) {
+        const tr = closeHistory(view.state.tr).setNodeMarkup(pos, undefined, {
+          ...current.attrs,
+          ...attrs,
+        });
+        tr.setSelection(NodeSelection.create(tr.doc, pos));
+        view.dispatch(tr);
+        // 同时隔离后续正文输入，避免一次撤销连带回退图片尺寸。
+        view.dispatch(closeHistory(view.state.tr));
+      }
+      if (focus) view.focus();
+      refresh();
+    }
+
+    function applyWidth() {
+      if (composing || !canEdit()) return;
+      const width = parseWidth(input.value);
+      if (width === null) {
+        error.textContent = `请输入 ${MIN_WIDTH}–${MAX_WIDTH} 之间的整数宽度`;
+        error.hidden = false;
+        input.setAttribute('aria-invalid', 'true');
+        input.setAttribute('aria-describedby', error.id);
+        input.focus();
+        positionControls();
+        return;
+      }
+      commit({ width });
+    }
+
+    function cancelResize() {
+      if (!drag) return;
+      const pointerId = drag.pointerId;
+      drag = undefined;
+      window.removeEventListener('pointermove', moveResize);
+      window.removeEventListener('pointerup', finishResize);
+      window.removeEventListener('pointercancel', cancelResize);
+      window.removeEventListener('blur', cancelResize);
+      window.removeEventListener('keydown', cancelOnEscape, true);
+      if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+      if (!destroyed) refresh();
+    }
+    function cancelOnEscape(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      cancelResize();
+    }
+    function moveResize(event: PointerEvent) {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      if (!canEdit()) {
+        cancelResize();
+        return;
+      }
+      event.preventDefault();
+      // 将横向和纵向拖动投影到图片原始比例，拖动任一方向都能等比例缩放。
+      const delta =
+        ((event.clientX - drag.startX) * drag.horizontal +
+          (event.clientY - drag.startY) * drag.ratio) /
+        (drag.horizontal ** 2 + drag.ratio ** 2);
+      drag.width = Math.max(
+        MIN_WIDTH,
+        Math.min(drag.maxWidth, Math.round(drag.startWidth + delta))
+      );
+      dom.style.width = `${drag.width}px`;
+      input.value = String(drag.width);
+    }
+    function finishResize(event: PointerEvent) {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      const width = drag.width;
+      const moved = width !== Math.round(drag.startWidth);
+      cancelResize();
+      if (moved) commit({ width });
+    }
+
+    handle.onpointerdown = (event) => {
+      if (!canEdit() || event.button !== 0 || !image.naturalWidth) return;
+      event.preventDefault();
+      event.stopPropagation();
+      selectImage();
+      clearError();
+      const parent = dom.parentElement!;
+      const style = window.getComputedStyle(parent);
+      const maxWidth = Math.max(
+        MIN_WIDTH,
+        Math.floor(
+          parent.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+        )
+      );
+      const startWidth = dom.getBoundingClientRect().width;
+      drag = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        startWidth,
+        ratio: image.naturalHeight / image.naturalWidth,
+        horizontal:
+          node.attrs.alignment === 'right' ? -1 : node.attrs.alignment === 'center' ? 0.5 : 1,
+        width: Math.round(startWidth),
+        maxWidth: Math.min(MAX_WIDTH, maxWidth),
+      };
+      dom.classList.add('milkdown-editor__image--resizing');
+      controls.hidden = true;
+      handle.setPointerCapture(event.pointerId);
+      window.addEventListener('pointermove', moveResize, { passive: false });
+      window.addEventListener('pointerup', finishResize);
+      window.addEventListener('pointercancel', cancelResize);
+      window.addEventListener('blur', cancelResize);
+      window.addEventListener('keydown', cancelOnEscape, true);
+    };
+    handle.onkeydown = (event) => {
+      if (!canEdit()) return;
+      if (['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+        event.preventDefault();
+        event.stopPropagation();
+        const step = (event.shiftKey ? 50 : 10) * (event.key === 'ArrowLeft' ? -1 : 1);
+        commit(
+          {
+            width: Math.max(
+              MIN_WIDTH,
+              Math.min(
+                MAX_WIDTH,
+                (parseWidth(node.attrs.width) ?? Math.round(image.getBoundingClientRect().width)) +
+                  step
+              )
+            ),
+          },
+          false
+        );
+      }
+    };
+    handle.onclick = () => input.focus();
+    image.onclick = (event) => {
+      if (canEdit()) {
+        event.preventDefault();
+        event.stopPropagation();
+        selectImage();
+      }
+    };
+    image.onload = () => {
+      failed = false;
+      loading = false;
+      refresh();
+    };
+    image.onerror = () => {
+      failed = true;
+      loading = false;
+      fallback.textContent = '图片加载失败';
+      refresh();
+    };
+    dom.onfocus = () => selectImage(false);
+    dom.onkeydown = (event) => {
+      if (event.key === 'Escape' && selected && !event.isComposing && !composing) {
+        event.preventDefault();
+        event.stopPropagation();
+        dismissed = true;
+        clearError();
+        refresh();
+        view.focus();
+      } else if (event.target === dom && ['Enter', ' '].includes(event.key)) {
+        event.preventDefault();
+        selectImage(false);
+        input.focus();
+      }
+    };
+    input.oninput = clearError;
+    const startComposition = () => {
+      composing = true;
+    };
+    const endComposition = (event: CompositionEvent) => {
+      composing = false;
+      compositionEndedAt = event.timeStamp;
+    };
+    input.addEventListener('compositionstart', startComposition);
+    input.addEventListener('compositionend', endComposition);
+    input.onkeydown = (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.isComposing && !composing && event.timeStamp - compositionEndedAt >= 50)
+        applyWidth();
+    };
+    apply.onclick = applyWidth;
+    reset.onclick = () => commit({ width: null });
+    const refreshReadonly = () => {
+      if (!canEdit()) cancelResize();
+      refresh();
+    };
+    refreshers.add(refreshReadonly);
+    cancellers.add(cancelResize);
+    refresh();
+
+    return {
+      dom,
+      update(nextNode) {
+        if (nextNode.type !== node.type) return false;
+        if (
+          drag &&
+          (nextNode.attrs.src !== node.attrs.src ||
+            nextNode.attrs.width !== node.attrs.width ||
+            nextNode.attrs.alignment !== node.attrs.alignment)
+        )
+          cancelResize();
+        node = nextNode;
+        refresh();
+        return true;
+      },
+      selectNode() {
+        selected = true;
+        dismissed = false;
+        refresh();
+      },
+      deselectNode() {
+        selected = false;
+        clearError();
+        cancelResize();
+        refresh();
+      },
+      stopEvent: (event) =>
+        event.target instanceof Node &&
+        (controls.contains(event.target) || handle.contains(event.target)),
+      ignoreMutation: (mutation) => mutation.type !== 'selection',
+      destroy() {
+        destroyed = true;
+        cancelResize();
+        watchPosition(false);
+        refreshers.delete(refreshReadonly);
+        cancellers.delete(cancelResize);
+        image.onload = image.onerror = image.onclick = null;
+        dom.onfocus = dom.onkeydown = null;
+        handle.onpointerdown = handle.onkeydown = handle.onclick = null;
+        input.oninput = input.onkeydown = null;
+        input.removeEventListener('compositionstart', startComposition);
+        input.removeEventListener('compositionend', endComposition);
+        apply.onclick = reset.onclick = null;
+        attachment.onclick = attachment.onmousedown = null;
+        apply.onmousedown = reset.onmousedown = null;
+        alignmentButtons.forEach(({ button }) => {
+          button.onclick = null;
+          button.onmousedown = null;
+        });
+      },
+    };
+  };
+
+  const remarkImages: MilkdownPlugin = (ctx) => {
+    const plugin: RemarkPlugin<Record<string, unknown>> = {
+      plugin: () => (tree) => restoreImageNodes(tree as MarkdownNode, ctx),
+      options: {},
+    };
+    ctx.update(remarkPluginsCtx, (plugins) => [...plugins, plugin]);
+    return () => () => {
+      ctx.update(remarkPluginsCtx, (plugins) => plugins.filter((item) => item !== plugin));
+    };
+  };
+
+  return {
+    plugins: [remarkImages, $view(imageSchema.node, () => createView)],
+    configure(ctx: Ctx) {
+      ctx.update(imageSchema.key, (previous) => (schemaCtx) => {
+        const schema = previous(schemaCtx);
+        return {
+          ...schema,
+          attrs: {
+            ...schema.attrs,
+            width: { default: null, validate: 'number|null' },
+            alignment: { default: null, validate: 'string|null' },
+          },
+          parseDOM: [
+            {
+              tag: 'img[src]',
+              getAttrs: (dom) =>
+                dom instanceof HTMLImageElement ? (readImage(dom) ?? false) : false,
+            },
+          ],
+          toDOM: (node) => [
+            'img',
+            {
+              src: node.attrs.src,
+              alt: node.attrs.alt,
+              title: node.attrs.title,
+              ...imageLayoutAttrs(node),
+            },
+          ],
+          parseMarkdown: {
+            match: schema.parseMarkdown.match,
+            runner: (state, markdown, type) => {
+              const image = markdown as ImageMarkdownNode;
+              state.addNode(type, {
+                src: image.url ?? '',
+                alt: image.alt ?? '',
+                title: image.title ?? '',
+                width: parseWidth(image.width),
+                alignment: parseAlignment(image.alignment),
+              });
+            },
+          },
+          toMarkdown: {
+            match: schema.toMarkdown.match,
+            runner: (state, node) => {
+              const width = parseWidth(node.attrs.width);
+              if (width === null && parseAlignment(node.attrs.alignment) === null)
+                schema.toMarkdown.runner(state, node);
+              else state.addNode('html', undefined, serializeImage(node));
+            },
+          },
+        };
+      });
+    },
+    readonlyChanged: () => refreshers.forEach((refresh) => refresh()),
+    destroy() {
+      disposed = true;
+      cancellers.forEach((cancel) => cancel());
+      refreshers.forEach((refresh) => refresh());
+      refreshers.clear();
+      cancellers.clear();
+    },
+  };
+}

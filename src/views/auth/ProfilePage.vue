@@ -1,41 +1,7 @@
 <template>
-  <AuthLayout title="账户资料" description="更新大家看到的你。" wide>
-    <form
-      class="auth-form"
-      novalidate
-      :aria-busy="busy || loading"
-      @submit.prevent="save"
-      @keydown.enter="guardComposition"
-    >
+  <AuthLayout title="帐号" description="管理你的档案、登录信息和设备" wide embedded>
+    <form class="auth-form" novalidate :aria-busy="busy || loading" @submit.prevent>
       <p v-if="loading" class="profile-page__status" role="status">正在加载资料…</p>
-      <p class="profile-page__account">
-        账号 <span>{{ authUser?.account }}</span>
-      </p>
-      <ProfileFields
-        ref="profileFields"
-        v-model="profile"
-        :errors="errors"
-        :disabled="busy || loading"
-        @composition="composing = $event"
-      />
-      <AvatorPicker
-        v-model="avator"
-        :current="removeAvator ? '' : authUser?.avator"
-        :disabled="busy || loading"
-        @remove="removeAvator = true"
-      />
-      <p v-if="uploading" class="profile-page__status" role="status">
-        正在上传头像 {{ progress }}%
-      </p>
-      <p class="auth-form__error" role="alert">{{ error }}</p>
-      <button class="auth-form__submit" type="submit" :disabled="busy || loading || !dirty">
-        <span v-if="busy" class="auth-form__spinner" aria-hidden="true" />{{
-          busy ? '正在保存…' : '保存资料'
-        }}
-      </button>
-      <button v-if="uploading" class="auth-form__link" type="button" @click="cancelUpload">
-        取消上传
-      </button>
       <button
         v-if="loadFailed"
         class="auth-form__link"
@@ -45,7 +11,41 @@
       >
         重新加载资料
       </button>
-      <RouterLink class="auth-form__link" to="/home">返回工作台</RouterLink>
+      <div class="profile-page__header">
+        <div class="profile-page__account">
+          <span class="profile-page__account-tips">账号</span>
+          <p class="profile-page__account-value">
+            <span>{{ authUser?.account }}</span>
+            <button
+              class="profile-page__copy"
+              type="button"
+              aria-label="复制账号"
+              :disabled="!authUser?.account"
+              @click="copyAccount"
+            >
+              复制
+            </button>
+          </p>
+        </div>
+        <AvatorPicker
+          :model-value="avator"
+          :current="authUser?.avator"
+          :loading="loading || savingAvator"
+          :disabled="busy || loading || loadFailed || signingOut"
+          @update:model-value="chooseAvator"
+          @error="error = $event"
+        />
+      </div>
+      <ProfileFields
+        :model-value="profile"
+        :errors="errors"
+        :hints="hints"
+        :disabled="loading || loadFailed || signingOut"
+        @update:model-value="editProfile"
+        @blur="saveField"
+        @composition="onComposition"
+      />
+      <p class="auth-form__error" role="alert">{{ error }}</p>
     </form>
     <div class="profile-page__logout">
       <button type="button" class="auth-form__link" :disabled="busy || signingOut" @click="signOut">
@@ -56,49 +56,61 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { onBeforeRouteLeave, RouterLink, useRouter } from 'vue-router';
+import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import AuthLayout from '@/components/auth/AuthLayout.vue';
 import ProfileFields from '@/components/auth/ProfileFields.vue';
 import AvatorPicker from '@/components/auth/AvatorPicker.vue';
 import { authUser } from '@/service/auth-session';
-import { getProfile, logout, updateProfile } from '@/service/api/auth-api';
+import { getProfile, logout, updateProfile, type ProfileInput } from '@/service/api/auth-api';
 import { uploadAsset } from '@/service/api/upload-api';
 import { profileErrors } from '@/utils/auth';
 import { errorMessage } from '@/utils/error';
-import { useNotificationStore } from '@/stores/notification';
 import { useConfirm } from '@/composables/useConfirm';
+import { useNotificationStore } from '@/stores/notification';
 
 const router = useRouter();
-const notification = useNotificationStore();
 const { confirm } = useConfirm();
-const profile = ref({ name: '', email: '', phone: '' });
-const initial = ref('');
+const notification = useNotificationStore();
+type Fields = Pick<ProfileInput, 'name' | 'email' | 'phone'>;
+type Field = keyof Fields;
+type Change = { field: Field; value: string; revision: number } | { field: 'avator'; value: File };
+const fields: Field[] = ['name', 'email', 'phone'];
+const profile = ref<Fields>({ name: '', email: '', phone: '' });
+const saved = ref<ProfileInput>({ name: '', email: '', phone: '', avator: '' });
 const avator = ref<File | null>(null);
-const removeAvator = ref(false);
 const errors = reactive({ name: '', email: '', phone: '' });
-const profileFields = ref<InstanceType<typeof ProfileFields>>();
+const hints = reactive({ name: '', email: '', phone: '' });
+const revisions = { name: 0, email: 0, phone: 0 };
 const busy = ref(false);
 const loading = ref(false);
 const loadFailed = ref(false);
 const signingOut = ref(false);
-const uploading = ref(false);
-const progress = ref(0);
+const savingAvator = ref(false);
 const composing = ref(false);
 const error = ref('');
-const dirty = computed(
-  () => JSON.stringify(profile.value) !== initial.value || !!avator.value || removeAvator.value
-);
+const pending = new Map<Change['field'], Change>();
+let saveRequest: Promise<void> | undefined;
+let activeChange: Change | undefined;
+let deferredField: Field | undefined;
 let controller: AbortController | undefined;
-let uploadedAvator = '';
-let approvedLeave = false;
 let disposed = false;
 function populate() {
   const user = authUser.value;
   profile.value = { name: user?.name ?? '', email: user?.email ?? '', phone: user?.phone ?? '' };
-  initial.value = JSON.stringify(profile.value);
+  saved.value = { ...profile.value, avator: user?.avator ?? '' };
 }
 populate();
+async function copyAccount() {
+  const account = authUser.value?.account;
+  if (!account) return;
+  try {
+    await navigator.clipboard.writeText(account);
+    notification.show('账号已复制', 'success');
+  } catch {
+    notification.show('复制失败，请手动选择账号复制', 'error');
+  }
+}
 async function load() {
   loading.value = true;
   loadFailed.value = false;
@@ -115,70 +127,110 @@ async function load() {
     loading.value = false;
   }
 }
-function guardComposition(event: KeyboardEvent) {
-  if (event.isComposing || composing.value) event.preventDefault();
-}
-function cancelUpload() {
-  controller?.abort();
-}
-async function save() {
-  if (busy.value || loading.value || composing.value || !dirty.value) return;
-  Object.assign(errors, profileErrors(profile.value));
-  await nextTick();
-  if (Object.values(errors).some(Boolean)) return profileFields.value?.focusError();
-  busy.value = true;
-  error.value = '';
-  try {
-    if (avator.value && !uploadedAvator) {
-      controller = new AbortController();
-      uploading.value = true;
-      progress.value = 0;
-      const asset = await uploadAsset(avator.value, 'avator', {
-        signal: controller.signal,
-        onProgress: (value) => {
-          progress.value = value;
-        },
-      });
-      uploadedAvator = asset.url;
-      uploading.value = false;
-    }
-    await updateProfile({
-      ...profile.value,
-      name: profile.value.name.trim(),
-      avator: uploadedAvator || (removeAvator.value ? '' : (authUser.value?.avator ?? '')),
-    });
-    avator.value = null;
-    removeAvator.value = false;
-    populate();
-    notification.show('资料已保存', 'success');
-  } catch (cause) {
-    error.value = controller?.signal.aborted
-      ? '上传已取消，资料尚未保存'
-      : errorMessage(cause, '保存失败，已保留修改');
-  } finally {
-    busy.value = false;
-    uploading.value = false;
-    controller = undefined;
+function editProfile(value: Fields) {
+  for (const field of fields) {
+    if (value[field] === profile.value[field]) continue;
+    errors[field] = '';
+    hints[field] = '';
+    revisions[field] += 1;
+    pending.delete(field);
   }
+  profile.value = value;
 }
-async function mayLeave() {
-  if (busy.value || signingOut.value) return false;
-  if (approvedLeave || !dirty.value) return true;
-  return confirm({
-    title: '资料尚未保存',
-    content: '离开后将丢失本次资料修改。',
-    confirmText: '放弃修改并离开',
-    cancelText: '继续编辑',
+function saveField(field: Field) {
+  if (loading.value || loadFailed.value || signingOut.value || disposed) return;
+  if (composing.value) {
+    deferredField = field;
+    return;
+  }
+  errors[field] = profileErrors(profile.value)[field];
+  if (errors[field]) return;
+  const value = field === 'name' ? profile.value[field].trim() : profile.value[field];
+  if (value === saved.value[field] && activeChange?.field !== field) {
+    profile.value[field] = value;
+    return;
+  }
+  if (
+    activeChange?.field === field &&
+    activeChange.value === profile.value[field] &&
+    activeChange.revision === revisions[field]
+  )
+    return;
+  hints[field] = '等待保存…';
+  enqueue({ field, value: profile.value[field], revision: revisions[field] });
+}
+async function onComposition(value: boolean) {
+  composing.value = value;
+  if (value || !deferredField) return;
+  const field = deferredField;
+  deferredField = undefined;
+  await nextTick();
+  saveField(field);
+}
+function chooseAvator(file: File) {
+  if (busy.value || loading.value || loadFailed.value || signingOut.value || disposed) return;
+  avator.value = file;
+  error.value = '';
+  savingAvator.value = true;
+  enqueue({ field: 'avator', value: file });
+}
+function enqueue(change: Change) {
+  pending.set(change.field, change);
+  if (saveRequest) return;
+  busy.value = true;
+  saveRequest = saveChanges().finally(() => {
+    busy.value = false;
+    saveRequest = undefined;
   });
+}
+async function saveChanges() {
+  while (pending.size && !disposed) {
+    const change = pending.values().next().value!;
+    pending.delete(change.field);
+    activeChange = change;
+    if (change.field !== 'avator') hints[change.field] = '正在保存…';
+    try {
+      let value: string;
+      if (change.field === 'avator') {
+        controller = new AbortController();
+        const asset = await uploadAsset(change.value, 'avator', { signal: controller.signal });
+        if (disposed) return;
+        value = asset.url;
+      } else {
+        value = change.value;
+        if (change.field === 'name') value = value.trim();
+      }
+      const user = await updateProfile({ ...saved.value, [change.field]: value });
+      if (disposed) return;
+      saved.value = { name: user.name, email: user.email, phone: user.phone, avator: user.avator };
+      if (change.field === 'avator') {
+        avator.value = null;
+      } else if (revisions[change.field] === change.revision) {
+        profile.value[change.field] = user[change.field];
+        errors[change.field] = '';
+        hints[change.field] = '已保存';
+      }
+    } catch (cause) {
+      if (disposed) return;
+      if (change.field === 'avator') {
+        error.value = errorMessage(cause, '头像保存失败，请重新选择头像重试');
+      } else if (revisions[change.field] === change.revision) {
+        hints[change.field] = '';
+        errors[change.field] = `${errorMessage(cause, '保存失败')}，请再次移开焦点重试`;
+      }
+    } finally {
+      if (change.field === 'avator') savingAvator.value = false;
+      controller = undefined;
+      activeChange = undefined;
+    }
+  }
 }
 async function signOut() {
   if (busy.value || signingOut.value) return;
   if (
     !(await confirm({
       title: '退出登录',
-      content: dirty.value
-        ? '资料尚未保存。退出后将丢失本次修改。'
-        : '退出当前账号，返回登录页面。',
+      content: '退出当前账号，返回登录页面。',
       confirmText: '退出登录',
       cancelText: '取消',
     }))
@@ -188,7 +240,6 @@ async function signOut() {
   error.value = '';
   try {
     await logout();
-    approvedLeave = true;
     signingOut.value = false;
     await router.replace({ name: 'login' });
   } catch (cause) {
@@ -197,44 +248,60 @@ async function signOut() {
     signingOut.value = false;
   }
 }
-function beforeUnload(event: BeforeUnloadEvent) {
-  if (!dirty.value && !busy.value) return;
-  event.preventDefault();
-  event.returnValue = '';
-}
-watch(avator, () => {
-  uploadedAvator = '';
-});
-onBeforeRouteLeave(mayLeave);
 onMounted(() => {
   document.title = '账户资料 · Voex';
   void load();
-  window.addEventListener('beforeunload', beforeUnload);
 });
 onBeforeUnmount(() => {
   disposed = true;
+  pending.clear();
   controller?.abort();
-  window.removeEventListener('beforeunload', beforeUnload);
 });
 </script>
 
 <style scoped lang="stylus">
-.profile-page__account
+.profile-page__header
   display flex
-  align-items flex-start
-  gap 14px
-  margin-bottom 20px
-  color var(--auth-muted)
-  font-size 12px
-  line-height 1.7
+  align-items center
+  justify-content space-between
+  margin-bottom 22px
 
-  span
-    flex 1
-    min-width 0
-    text-align right
-    overflow-wrap anywhere
-    white-space pre-wrap
-    color var(--color-text-secondary)
+.profile-page__account:hover
+  .profile-page__copy
+    opacity 1
+    pointer-events auto
+
+.profile-page__account-value
+  display flex
+  align-items center
+  gap 8px
+
+.profile-page__copy
+  display inline-flex
+  align-items center
+  justify-content center
+  min-height 24px
+  padding 2px 6px
+  border-radius 6px
+  color var(--color-text-secondary)
+  font-size 12px
+  opacity 0
+  pointer-events none
+
+  &:hover:not(:disabled)
+    background var(--auth-input)
+    color var(--color-text-primary)
+
+  &:focus-visible
+    outline 2px solid var(--auth-focus)
+    outline-offset 2px
+
+.profile-page__account-tips
+    display: block;
+    margin-bottom: 8px;
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    line-height: 18px;
 
 .profile-page__status
   min-height 24px

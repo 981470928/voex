@@ -22,6 +22,26 @@ export interface DocumentPermissions {
   share: boolean;
 }
 
+export interface FilePath {
+  team_key: string;
+  project_key: string;
+  project_name: string;
+  folder_key: string;
+  folder_name: string;
+}
+
+export interface FileDetails {
+  file_key: string;
+  file_name: string;
+  created_at: string;
+  updated_at: string;
+  updated_by: Pick<Creator, 'id' | 'name'> | null;
+  updated_by_kind: 'user' | 'anonymous' | 'unknown';
+  access: 'project' | 'share';
+  permissions: DocumentPermissions;
+  path: FilePath | null;
+}
+
 export interface DocumentSummary {
   id: number;
   file_key: string;
@@ -67,6 +87,12 @@ export function getDocument(file_key: string, signal?: AbortSignal) {
   return http.get<ApiError, DocumentInfo>(`/document/${encodeURIComponent(file_key)}`, { signal });
 }
 
+export function getDocumentDetails(fileKey: string, signal?: AbortSignal) {
+  return http.get<ApiError, FileDetails>(`/document/${encodeURIComponent(fileKey)}/details`, {
+    signal,
+  });
+}
+
 /** 修改文档 */
 export function updateDocument(
   file_key: string,
@@ -80,7 +106,7 @@ export function updateDocument(
   );
 }
 
-/** 删除文档 */
+/** 将文档移入回收站，保留正文与附件关联。 */
 export function deleteDocument(file_key: string) {
   return http.delete<ApiError, { success: boolean }>(`/document/${encodeURIComponent(file_key)}`);
 }

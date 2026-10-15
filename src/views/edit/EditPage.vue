@@ -74,8 +74,37 @@
               <span class="edit-page__heartbeat" aria-hidden="true" />
             </template>
           </span>
+          <button
+            v-if="isDev"
+            ref="debugToolButton"
+            type="button"
+            class="edit-page__icon-button edit-page__debug-tool"
+            :title="exportingSchema ? '正在读取已保存的文档数据' : 'debugTool'"
+            aria-label="debugTool"
+            aria-haspopup="menu"
+            :aria-expanded="debugMenuOpen"
+            :aria-busy="exportingSchema"
+            :disabled="exportingSchema"
+            @click="toggleDebugMenu"
+            @keydown.down.prevent="toggleDebugMenu"
+          >
+            <SvgIcon v-if="isMobile" name="bug" :size="18" />
+            <template v-else>debugTool</template>
+          </button>
         </div>
         <div class="edit-page__header-actions">
+          <button
+            v-if="!isMobile && activeDocKey"
+            type="button"
+            class="edit-page__icon-button"
+            title="AI 文档助手"
+            aria-label="AI 文档助手"
+            :aria-expanded="aiOpen"
+            :disabled="aiBusy"
+            @click="aiOpen = !aiOpen"
+          >
+            <SvgIcon name="ai" :size="20" />
+          </button>
           <button
             v-if="activeDocKey"
             type="button"
@@ -152,10 +181,13 @@
             ref="editorRef"
             :key="activeDocKey"
             :default-value="editorContent"
+            :document-key="activeDocKey"
             :attachments="attachments"
             :upload-attachments="triggerFileUpload"
+            :import-images="importImages"
+            :load-image="loadImage"
             :on-preview-attachment="handlePreviewAttachment"
-            :readonly="!canWrite"
+            :readonly="!canWrite || aiBusy"
             :show-toolbar="!isMobile"
             @ready="handleEditorReady"
             @change="handleEditorChange"
@@ -186,6 +218,20 @@
       </div>
     </main>
 
+    <AIEditorPanel
+      v-if="aiMounted && !isMobile"
+      v-show="aiOpen"
+      :document-key="activeDocKey"
+      :document-name="activeDoc?.file_name ?? ''"
+      :can-write="canWrite"
+      :busy="busy || saving || loading || dirty || aiBusy"
+      :prepare="prepareAIDocument"
+      :apply="applyDocumentReview"
+      :normalize="normalizeAIContent"
+      :capabilities="aiCapabilities"
+      @close="aiOpen = false"
+    />
+
     <!-- Right: Attachments -->
     <VoexDrawer
       id="editor-attachment-drawer"
@@ -196,6 +242,7 @@
       @update:model-value="drawer.setOpen('attachments', $event)"
     >
       <AttachmentPanel
+        v-show="!aiOpen || isMobile"
         :mobile="isMobile"
         :can-upload="canWrite && !busy"
         :attachments="attachments"
@@ -219,11 +266,23 @@
       :file-name="activeDoc.file_name"
     />
     <LocalDraftDialog v-model="showDraft" :content="localContent" />
+    <VoexContextMenu
+      v-if="isDev"
+      v-model="debugMenuOpen"
+      :items="debugMenuItems"
+      :x="debugMenuPosition.x"
+      :y="debugMenuPosition.y"
+      :trigger="debugToolButton"
+      label="debugTool"
+      @select="handleDebugAction"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import AIEditorPanel from '@/components/ai/AIEditorPanel.vue';
+import type { FileCapabilities } from '@/agent/editor-tools';
 import SvgIcon from '@/components/SvgIcon.vue';
 import VoexDrawer from '@/components/VoexDrawer.vue';
 import { useDrawerStore } from '@/stores/drawer';
@@ -233,7 +292,7 @@ import EditorLeftContainer from '@/views/edit/EditorLeftContainer.vue';
 import AttachmentPanel from '@/views/edit/AttachmentPanel.vue';
 import { useDocumentPage } from '@/composables/useDocumentPage';
 import { MilkdownProvider } from '@milkdown/vue';
-import type { FileInfo } from '@/service/api/document-api';
+import { getDocument, type FileInfo } from '@/service/api/document-api';
 import ShareDialog from '@/components/share/ShareDialog.vue';
 import LocalDraftDialog from '@/components/share/LocalDraftDialog.vue';
 import http from '@/service/api/https';
@@ -242,11 +301,27 @@ import { MessageType } from '@/constant/status';
 import { useNotificationStore } from '@/stores/notification';
 import { errorMessage } from '@/utils/error';
 import type { ApiError } from '@/service/api/index';
+import {
+  VoexContextMenu,
+  type ContextMenuItem,
+  type ContextMenuOption,
+} from '@/plugins/context-menu';
 
+const isDev = import.meta.env.DEV;
+const debugToolButton = ref<HTMLButtonElement | null>(null);
+const debugMenuOpen = ref(false);
+const debugMenuPosition = ref({ x: 0, y: 0 });
+const exportingSchema = ref(false);
+let schemaExportController: AbortController | undefined;
 const drawer = useDrawerStore();
 const sidebarCollapsed = ref(false);
 const showShare = ref(false);
 const showDraft = ref(false);
+const aiOpen = ref(false);
+const aiMounted = ref(false);
+watch(aiOpen, (open) => {
+  if (open) aiMounted.value = true;
+});
 const notification = useNotificationStore();
 const { confirm } = useConfirm();
 
@@ -259,6 +334,9 @@ const {
   loadError,
   creating,
   busy,
+  aiBusy,
+  prepareAIDocument,
+  applyDocumentReview,
   dirty,
   canWrite,
   saving,
@@ -285,8 +363,54 @@ const {
   handlePreview,
   handleDeleteAttachment,
   triggerFileUpload,
+  importImages,
+  loadImage,
   handleDrop,
 } = useDocumentPage();
+
+function normalizeAIContent(content: string) {
+  if (!editorRef.value) throw new Error('编辑器尚未就绪');
+  return editorRef.value.normalizeMarkdown(content);
+}
+
+const aiCapabilities: FileCapabilities = {
+  canCreate: () => !!projectTree.value?.project.permissions.write,
+  canRename: () => canWrite.value,
+  exportDocument: async (signal) => {
+    const key = activeDocKey.value;
+    if (!key || busy.value || saving.value || dirty.value)
+      throw new Error('请先等待当前文档保存完成再导出');
+    const saved = await getDocument(key, signal);
+    signal.throwIfAborted();
+    if (key !== activeDocKey.value) throw new Error('文档已切换，导出已取消');
+    const url = URL.createObjectURL(
+      new Blob([saved.file_content ?? ''], { type: 'text/markdown;charset=utf-8' })
+    );
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${sanitizeExportName(saved.file_name)}.md`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
+};
+
+const debugMenuItems = computed<ContextMenuItem[]>(() => [
+  {
+    value: 'export-schema',
+    label: '导出 Schema',
+    icon: 'download',
+    disabled: !activeDocKey.value || loading.value || busy.value || exportingSchema.value,
+    description: !activeDocKey.value
+      ? '请先打开文档'
+      : loading.value
+        ? '正在加载文档'
+        : busy.value
+          ? '请等待当前操作完成'
+          : exportingSchema.value
+            ? '正在读取已保存的文档数据'
+            : '导出数据库中已保存的完整文档数据',
+  },
+]);
 
 const localContent = computed(() => {
   void showDraft.value;
@@ -296,6 +420,8 @@ watch(activeDocKey, () => {
   drawer.closeAll();
   showShare.value = false;
   showDraft.value = false;
+  debugMenuOpen.value = false;
+  cancelSchemaExport();
 });
 
 const MIN_SAVE_ANIMATION_DURATION = 1000;
@@ -328,6 +454,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  cancelSchemaExport();
   clearTimeout(saveAnimationTimer);
   drawer.closeAll();
 });
@@ -353,6 +480,69 @@ function sanitizeExportName(name: string) {
   const cleanName = name.trim().replace(/[\\/:*?"<>|]/g, '_');
   const baseName = cleanName || 'document';
   return baseName.replace(/\.[^.]+$/u, '') || 'document';
+}
+
+function toggleDebugMenu(event: MouseEvent | KeyboardEvent) {
+  if (!isDev || !debugToolButton.value || (event instanceof KeyboardEvent && event.isComposing))
+    return;
+  const rect = debugToolButton.value.getBoundingClientRect();
+  debugMenuPosition.value = { x: rect.left, y: rect.bottom + 4 };
+  debugMenuOpen.value = !debugMenuOpen.value;
+}
+
+function cancelSchemaExport() {
+  schemaExportController?.abort();
+  schemaExportController = undefined;
+  exportingSchema.value = false;
+}
+
+async function handleDebugAction(item: ContextMenuOption) {
+  if (
+    !isDev ||
+    item.value !== 'export-schema' ||
+    item.disabled ||
+    !activeDocKey.value ||
+    loading.value ||
+    busy.value ||
+    exportingSchema.value
+  )
+    return;
+
+  const fileKey = activeDocKey.value;
+  const controller = new AbortController();
+  schemaExportController = controller;
+  exportingSchema.value = true;
+  try {
+    const savedDocument = await getDocument(fileKey, controller.signal);
+    if (
+      controller.signal.aborted ||
+      schemaExportController !== controller ||
+      activeDocKey.value !== fileKey
+    )
+      return;
+    const blob = new Blob([JSON.stringify(savedDocument, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    try {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${sanitizeExportName(savedDocument.file_name)}.schema.json`;
+      link.click();
+      notification.show('已开始下载已保存的文档数据', 'success');
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+  } catch (cause) {
+    if (!controller.signal.aborted && schemaExportController === controller) {
+      notification.show(errorMessage(cause, '导出已保存文档失败'), 'error', 0);
+    }
+  } finally {
+    if (schemaExportController === controller) {
+      schemaExportController = undefined;
+      exportingSchema.value = false;
+    }
+  }
 }
 
 function buildExportFilename(includeAttachments: boolean) {
@@ -467,6 +657,14 @@ async function handleExportDocument() {
   &__right-sidebar-icon
     transform scaleX(-1)
 
+  &__debug-tool
+    width auto
+    padding 0 8px
+    border-radius 6px
+    font-size 12px
+    line-height 1
+    white-space nowrap
+
   &--mobile
     .edit-page__header
       height auto
@@ -484,6 +682,11 @@ async function handleExportDocument() {
     .edit-page__icon-button
       width 44px
       height 44px
+
+    .edit-page__debug-tool
+      width 44px
+      padding 0
+      border-radius 50%
 
     .milkdown-editor__content
       padding 20px 16px 72px

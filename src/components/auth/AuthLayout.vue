@@ -1,22 +1,34 @@
 <template>
-  <main class="auth-layout" data-theme="dark">
+  <component
+    :is="embedded ? 'section' : 'main'"
+    class="auth-layout"
+    :class="{ 'auth-layout--embedded': embedded }"
+    data-theme="dark"
+  >
     <section class="auth-layout__content" :class="{ 'auth-layout__content--wide': wide }">
       <header class="auth-layout__header">
-        <img class="auth-layout__logo" :src="logo" alt="Voex" width="40" height="40" />
+        <img
+          v-if="!embedded"
+          class="auth-layout__logo"
+          :src="logo"
+          alt="Voex"
+          width="40"
+          height="40"
+        />
         <h1 class="auth-layout__title">{{ title }}</h1>
         <p v-if="description" class="auth-layout__description">{{ description }}</p>
       </header>
       <slot />
     </section>
-    <span class="auth-layout__signature" aria-hidden="true">Voex</span>
-  </main>
+    <span v-if="!embedded" class="auth-layout__signature" aria-hidden="true">Voex</span>
+  </component>
 </template>
 
 <script setup lang="ts">
 import logo from '@/assets/image/voex-icon-white-128.png';
 import '@/assets/style/auth.styl';
 
-defineProps<{ title: string; description?: string; wide?: boolean }>();
+defineProps<{ title: string; description?: string; wide?: boolean; embedded?: boolean }>();
 </script>
 
 <style scoped lang="stylus">
@@ -74,4 +86,16 @@ defineProps<{ title: string; description?: string; wide?: boolean }>();
 @media (max-height: 500px)
   .auth-layout
     padding-top 28px
+
+.auth-layout--embedded
+  height 100%
+  min-height 0
+  overflow-y auto
+  padding 32px 24px
+  border-radius inherit
+  background transparent
+
+@media (max-width: 700px)
+  .auth-layout--embedded
+    padding 24px 16px
 </style>

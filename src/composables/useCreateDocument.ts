@@ -26,7 +26,7 @@ export function useCreateDocument() {
     modal.showModal(ModalType.INPUT_DIALOG, {
       title: '创建文件',
       tips: '文件名称',
-      defaultValue: '未命名.md',
+      defaultValue: '未命名',
       okText: '创建',
       onOK: async (name) => {
         if (!active || creating.value) return;

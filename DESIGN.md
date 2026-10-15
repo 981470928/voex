@@ -51,7 +51,9 @@ components:
 
 Desktop 顶栏左侧创建、右侧面包屑。内容最大宽 1480px，桌面边距 36px，720px 以下边距 16px。目录网格最小卡宽 180px，手机两列；列表在窄屏保留名称和操作。两种模式使用同一数据、排序与动作。
 
-目录用 document 自然滚动，每页 48 项，页码位于 URL。编辑器在桌面保持三栏结构，项目树宽 264px，正文与树各自滚动。`src/utils/platform.ts` 的 `isMobile` 为真时启用手机模式：正文占满宽度，文档目录从左侧抽屉打开，文件列表从右侧抽屉打开；标题栏提供两个入口。手机隐藏编辑工具栏，添加附件入口放在文件列表内。分享与导出在桌面和手机均为标题栏右侧圆形图标按钮，手机按钮 44px，长标题省略并保留保存状态。文件路由是状态来源，目录上下文通过 `/desktop?project=…&folder=…` 恢复。
+目录用 document 自然滚动，每页 48 项，页码位于 URL。编辑器在桌面保持三栏结构，项目树宽 264px，正文与树各自滚动。`src/utils/platform.ts` 的 `isMobile` 为真时启用手机模式：正文占满宽度，文档目录从左侧抽屉打开，文件列表从右侧抽屉打开；标题栏提供两个入口。手机隐藏编辑工具栏，添加附件入口放在文件列表内。分享与导出在桌面和手机均为标题栏右侧圆形图标按钮，手机按钮 44px，长标题省略并保留保存状态。文件路由是状态来源，目录上下文通过 `/home/project/:projectId/:folderId?` 恢复，`projectId` 必填；默认入口 `/home` 与未匹配路由进入 `/home/recent`，项目列表仅在侧边栏展示，不提供独立的所有项目页面，团队上下文使用 query `team_key`。
+
+账户资料内容依次为头像、账号、昵称、邮箱和手机号。文本字段在 blur 后校验并逐项自动保存，头像选择或移除后立即保存，不提供手动保存或返回工作台按钮。沿用 AuthField 的 hint 区域显示等待保存、正在保存、已保存及错误，输入时清除旧反馈；头像上传状态、错误、取消和重试位于头像下方。
 
 ## Elevation & Depth
 
@@ -63,15 +65,31 @@ Desktop 顶栏左侧创建、右侧面包屑。内容最大宽 1480px，桌面�
 
 ## Components
 
+桌面编辑页的 AI 助手与附件栏共用右侧区域，助手宽 380px，沿用工作台背景、系统字体与 6px 控件圆角。`src/components/ai/ai.styl` 统一配置、对话与审阅按钮和字段，消费 `theme.styl` 与 `main.css` 既有变量。模型、协议、输出参数与审阅文件选择使用原生 select，接受系统选项弹层。配置和审阅复用 VoexModal；审阅用只读 Markdown 双栏对比，以 `+` / `−` / `~` 和现有 `--color-green` / `--color-red` 共同标记新增、删除、修改。长对比分页，保留行号；本期不提供手机 AI 入口。
+
+AI 对话历史从后端恢复，每次读取最近 20 轮，列表顶部提供“加载更早的对话”，追加旧记录时保持当前阅读位置。历史加载、回复保存和审阅读取各有独立状态；保存失败在对应回复下提供“重试保存回复”。未完成的历史轮次明确提示可发送新指令，不显示持续运行的假状态。已应用的审阅按钮保持“查看已应用修改”，完整快照仅在打开时读取。
+
 `InputDialog` 是命名输入和异步提交的公共入口；`ConfirmDialog` 是删除/未保存确认入口；`VoexModal` 负责焦点、Escape、背景隔离和滚动锁；`VoexDrawer` 复用其 left/right 布局变体，`stores/drawer.ts` 管理互斥的左右抽屉，切换文档或离开编辑页时关闭；`NotificationBar` 与 notification store 负责统一提示。创建文件统一通过 `useCreateDocument`：后台确定落点，展示实际路径 1000ms 后跳转。
 
+编辑器 `PexelsDialog` 复用 VoexModal，沿用工作台主题、系统字体和 6px 控件圆角。图片保持原始比例，以三列瀑布流展示，手机两列、极窄屏一列；筛选和署名固定在列表滚动区域外。方向和颜色使用有 label 的原生 select，接受平台选项弹层。点击图片直接插入，摄影师和 Pexels 来源链接始终可见。
+
+正文图片继续使用 inline image 节点。选中后显示等比例缩放手柄，以及带 label 的宽度输入、应用、原始尺寸和左对齐/居中/右对齐操作；浮层使用既有编辑器主题变量、6px 圆角和 shadow token，并在滚动、窄屏时保持可见。仅保存宽度，图片高度跟随原始比例；显示宽度受容器约束，窄屏不改变文档中保存的宽度。未设置对齐时保留原有行内显示；选择对齐后仅当前图片独占一行，通过 margin 对齐，不修改段落或其他图片。右对齐的缩放手柄位于左下角，其他情况位于右下角。只读模式隐藏操作控件。
+
+粘贴图片、Pexels 图片与本地图片统一先导入文档附件，再插入图片节点；正文保存附件下载地址，不保存临时 Blob URL 或新导入图片的 base64。默认以图片形式显示，初始宽度为编辑器正文可用宽度的一半；图片浮层提供“显示为附件”，图片附件卡片提供“显示为图片”，切换复用同一文件。图片读取沿用各页面现有鉴权接口。`editor-paste.ts` 独立管理粘贴转换、异步选区映射和导入占位，保留特殊格式转换的扩展入口。
+
+`src/components/files/FileList.vue` 是项目目录与最近文件的共享列表，统一网格/列表切换、刷新、加载/空/错误状态、分页和右键菜单入口；布局偏好沿用 `voex-desktop-view`。文件链接保持语义化，列表窄屏始终保留文件名与操作。`FileDetailsDialog` 复用 VoexModal，名称允许换行，创建/修改时间与修改人按标签和值排列；仅有项目访问权限时显示可换行的路径链接，项目名进入项目，文件夹名与文件名进入所在目录。视觉沿用当前工作台 tokens。
+
 `ProjectTree` 使用嵌套列表、文件夹 disclosure button 和 RouterLink；键盘可 Tab 聚焦、Enter 激活，展开状态由 `aria-expanded` 表达，不冒充具备方向键操作的 ARIA tree widget。
+
+回收站在 Home 工作台中使用独立语义表格，名称与恢复/彻底删除动作优先，移入时间和到期时间使用现有辅助文字层级；窄屏将行转为带字段标签的纵向记录，不省略删除人、到期时间或操作。项目和每页条数沿用原生 select，接受系统选项 popup；按钮与状态复用 `team.styl`，确认复用 ConfirmDialog，通知复用 NotificationBar，不新增 theme tokens。列表区域拥有内部滚动，沿用全局滚动条基线。
+
+右键菜单统一使用 `src/plugins/context-menu/VoexContextMenu.vue`，通过 Teleport 脱离目录裁剪区域。浮层消费 `--color-bg-secondary`、`--color-border-secondary`、`--shadow-medium` 与既有圆角 tokens，行高至少 34px，图标 16px；危险操作以分隔线和 `--color-red` 区分，禁用原因直接显示。菜单层级为 200，低于通知和原生 modal 的 top layer。
 
 团队管理沿用 Home 的深色工作台，系统字体和低对比细边框。团队卡片显示名称、角色与人数，选中状态使用现有 `--color-accent` 边框；个人团队标记只是类型说明。成员、申请、邀请以紧凑行展示，不引入营销卡片。页面标题 20px，团队名称 17px，操作与正文 13px，辅助信息 12px。团队选择和转让对象使用带 label 的原生 select，接受浏览器/系统的选项弹层外观和键盘行为。
 
 团队共用的表单、按钮、状态样式由 `src/components/team/team.styl` 消费既有 `theme.styl` 语义变量：背景 `--color-bg-secondary` / `--color-bg-panel`，文本 `--color-text-primary` / `--color-text-secondary` / `--color-text-tertiary`，边框 `--color-border-primary`，操作 `--color-brand-bg` / `--color-brand-text`，危险操作 `--color-red`，焦点 `--color-accent`。未新增全局颜色或另一份 theme。团队与项目权限弹窗仍由 VoexModal 负责焦点和滚动隔离，权限与移除确认使用 ConfirmDialog。
 
-认证页面复用 `AuthLayout`（登录宽 320px，注册/资料宽 360px）、`AuthField`、`ProfileFields`、`AvatorPicker`。Voex 既有白色 logo 位于标题上方，表单无外围卡片；系统字体，标题 20px / 600，输入 14px，按钮高 44px / 胶囊圆角，输入圆角 10px。短屏与手机保持自然滚动，账号/密码不截断粘贴。会话过期使用既有 `VoexModal` 配合 `LoginForm`，避免销毁当前编辑页面。
+认证页面复用 `AuthLayout`（登录宽 320px，注册/资料宽 360px）、`AuthField`、`ProfileFields`、`AvatorPicker`。登录与注册的 Voex 既有白色 logo 位于标题上方，表单无外围卡片；系统字体，标题 20px / 600，输入 14px，按钮高 44px / 胶囊圆角，输入圆角 10px。账户资料使用 `/home/profile` 子路由，保留 Home 侧边栏；`AuthLayout` 的 embedded 模式省略认证 logo 与底部署名，透明背景融入工作台，表单在 Home 内容区内滚动。登录与注册在短屏与手机保持自然滚动，账号/密码不截断粘贴。会话过期使用既有 `VoexModal` 配合 `LoginForm`，避免销毁当前编辑页面。
 
 下载队列以内联区域放在附件底部，保留展开/折叠与独立滚动，沿用全局 download store，不占用悬浮位置。
 

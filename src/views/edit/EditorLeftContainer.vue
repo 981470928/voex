@@ -43,8 +43,8 @@
         :nodes="nodes"
         :expanded="expanded"
         :active-key="displayedDocKey"
-        :writable="tree?.project.permissions.write === true"
-        :busy="busy"
+        :project="tree?.project"
+        :busy="busy || loading"
         @toggle="toggleFolder"
         @rename="$emit('rename', $event)"
         @delete="$emit('delete', $event)"
@@ -52,7 +52,7 @@
     </div>
     <div class="editor-left__footer">
       <button
-        :disabled="loading || creating || !tree?.project.permissions.write"
+        :disabled="loading || creating || !permission.folder(tree?.project).write"
         @click="$emit('create')"
       >
         <SvgIcon name="cross" :size="18" aria-hidden="true" />创建文件
@@ -81,6 +81,7 @@ import { useImages } from '@/composables/useImages';
 import { buildDirectoryTree, desktopLocation, folderAncestors } from '@/utils/workspace';
 import type { DocumentSummary } from '@/service/api/document-api';
 import type { ProjectTree as ProjectTreeData } from '@/service/api/workspace-api';
+import { usePermissionStore } from '@/stores/permission';
 
 const props = defineProps<{
   tree: ProjectTreeData | null;
@@ -97,6 +98,7 @@ defineEmits<{
   delete: [doc: DocumentSummary];
   rename: [doc: DocumentSummary];
 }>();
+const permission = usePermissionStore();
 const { getImages } = useImages('/');
 const expanded = ref(new Set<string>());
 // 切换文件时父级会暂时清空数据，保留已渲染的目录，直到新数据返回或加载结束。

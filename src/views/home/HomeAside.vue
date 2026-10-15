@@ -8,7 +8,7 @@
           id="workspace-team"
           class="home-aside__team-select"
           :value="currentTeam?.team_key || ''"
-          :disabled="teams.loading || creating"
+          :disabled="teams.loading || creating || busy"
           @change="switchTeam"
         >
           <option v-if="!currentTeam" value="">
@@ -36,7 +36,13 @@
         </li>
       </ul>
 
-      <section class="home-aside__section" aria-label="团队项目" :aria-busy="loading">
+      <section
+        ref="projectSection"
+        class="home-aside__section"
+        aria-label="团队项目"
+        :aria-busy="loading || busy"
+        tabindex="-1"
+      >
         <div class="home-aside__section-header">
           <h2 class="home-aside__section-title">
             项目
@@ -47,7 +53,7 @@
             type="button"
             title="创建项目"
             aria-label="创建项目"
-            :disabled="loading || creating || !currentTeam?.permissions.write"
+            :disabled="loading || creating || busy || !currentTeam?.permissions.write"
             @click="openCreateProject"
           >
             <SvgIcon name="add" :size="14" />
@@ -64,7 +70,14 @@
         </div>
         <p v-else-if="!loading && !projects.length" class="home-aside__message">尚无项目</p>
         <ul v-if="projects.length" class="home-aside__list">
-          <li v-for="project in projects" :key="project.project_key">
+          <li
+            v-for="project in projects"
+            :key="project.project_key"
+            class="home-aside__project-item"
+            :class="{ 'home-aside__project-item--context': isProjectMenuOpen(project) }"
+            @contextmenu.prevent.stop="openProjectMenu($event, project)"
+            @keydown="handleProjectKeydown($event, project)"
+          >
             <RouterLink
               class="home-aside__item home-aside__project"
               :class="{ 'home-aside__item--active': projectKey === project.project_key }"
@@ -75,10 +88,24 @@
               }"
               :aria-current="projectKey === project.project_key ? 'page' : undefined"
               :title="project.name"
+              aria-keyshortcuts="Shift+F10"
             >
               <SvgIcon class="home-aside__icon" name="project-original" :size="14" />
               <span class="home-aside__label">{{ project.name }}</span>
             </RouterLink>
+            <button
+              class="home-aside__project-menu"
+              type="button"
+              title="更多操作"
+              :aria-label="project.name + '的更多操作'"
+              aria-haspopup="menu"
+              :aria-expanded="isProjectMenuOpen(project)"
+              :disabled="loading || creating || busy"
+              @click.stop="openProjectMenu($event, project, true)"
+              @keydown.down.prevent.stop="openProjectMenu($event, project, true)"
+            >
+              <SvgIcon name="more-16" :size="16" />
+            </button>
           </li>
         </ul>
       </section>
@@ -137,38 +164,258 @@
       <span class="home-aside__label">{{ authUser?.name || '账户资料' }}</span>
       <SvgIcon class="home-aside__account-setting" name="setting" :size="15" />
     </RouterLink>
+    <VoexContextMenu
+      v-if="contextMenu"
+      v-model="contextMenuOpen"
+      :items="contextMenuItems"
+      :x="contextMenu.x"
+      :y="contextMenu.y"
+      :trigger="contextMenu.trigger"
+      :label="(contextProject?.name || '项目') + '的操作'"
+      @select="selectProjectMenu"
+    />
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import SvgIcon from '@/components/SvgIcon.vue';
 import logo from '@/assets/image/voex-icon-white-16.png';
-import { queryProjects, createProject, type ProjectInfo } from '@/service/api/workspace-api';
+import {
+  queryProjects,
+  createProject,
+  renameProject,
+  deleteProject,
+  createFolder,
+  type ProjectInfo,
+} from '@/service/api/workspace-api';
 import { ModalType, useModalStore } from '@/stores/modal';
 import { useNotificationStore } from '@/stores/notification';
 import { errorMessage } from '@/utils/error';
 import { authUser } from '@/service/auth-session';
 import { useTeamStore } from '@/stores/team';
+import { usePermissionStore } from '@/stores/permission';
+import { useConfirm } from '@/composables/useConfirm';
+import { MessageType } from '@/constant/status';
+import {
+  VoexContextMenu,
+  type ContextMenuItem,
+  type ContextMenuOption,
+} from '@/plugins/context-menu';
 
 const route = useRoute();
 const router = useRouter();
 const modal = useModalStore();
 const notification = useNotificationStore();
 const teams = useTeamStore();
+const permission = usePermissionStore();
+const { confirm } = useConfirm();
 const currentTeam = computed(() =>
   teams.resolve(typeof route.query.team_key === 'string' ? route.query.team_key : undefined)
 );
 const projects = ref<ProjectInfo[]>([]);
 const loading = ref(true);
 const creating = ref(false);
+const busy = ref(false);
+const projectSection = ref<HTMLElement>();
+const contextMenuOpen = ref(false);
+const contextMenu = shallowRef<{
+  projectKey: string;
+  x: number;
+  y: number;
+  trigger: HTMLElement | null;
+} | null>(null);
+const contextProject = computed(() =>
+  projects.value.find((project) => project.project_key === contextMenu.value?.projectKey)
+);
+const contextMenuItems = computed<ContextMenuItem[]>(() => {
+  const project = contextProject.value;
+  if (!project) return [];
+  const disabled =
+    loading.value || creating.value || busy.value || !permission.project(project).write;
+  return [
+    {
+      value: 'create-folder',
+      label: '创建文件夹',
+      icon: 'folder',
+      disabled,
+      description: !permission.project(project).write ? '没有编辑权限' : undefined,
+    },
+    {
+      value: 'rename',
+      label: '重命名',
+      icon: 'write',
+      disabled,
+      description: !permission.project(project).write ? '没有编辑权限' : undefined,
+    },
+    { separator: true },
+    {
+      value: 'delete',
+      label: '彻底删除项目',
+      icon: 'trash',
+      danger: true,
+      disabled,
+      description: permission.project(project).write ? '包含回收站内容，无法恢复' : '没有删除权限',
+    },
+  ];
+});
 const error = ref('');
 const projectKey = computed(() =>
   typeof route.params.projectId === 'string' ? route.params.projectId : undefined
 );
 let controller: AbortController | undefined;
 let active = true;
+let focusAfterRefresh: { target: HTMLElement | null; location: string } | undefined;
+
+function isProjectMenuOpen(project: ProjectInfo) {
+  return contextMenuOpen.value && contextMenu.value?.projectKey === project.project_key;
+}
+
+function openProjectMenu(
+  event: MouseEvent | KeyboardEvent,
+  project: ProjectInfo,
+  dropdown = false
+) {
+  if (!active || loading.value || creating.value || busy.value) return;
+  const source = event.currentTarget as HTMLElement;
+  if (
+    dropdown &&
+    event.type === 'click' &&
+    isProjectMenuOpen(project) &&
+    contextMenu.value?.trigger === source
+  ) {
+    contextMenuOpen.value = false;
+    return;
+  }
+  const target =
+    event.target instanceof Element ? event.target.closest<HTMLElement>('a, button') : null;
+  const trigger =
+    target && source.contains(target) && !target.matches(':disabled')
+      ? target
+      : source.querySelector<HTMLElement>('.home-aside__project');
+  const rect = (trigger ?? source).getBoundingClientRect();
+  const keyboard = event instanceof KeyboardEvent || (event.clientX === 0 && event.clientY === 0);
+  contextMenu.value = {
+    projectKey: project.project_key,
+    x: dropdown || keyboard ? rect.left : event.clientX,
+    y: dropdown ? rect.bottom + 4 : keyboard ? rect.bottom : event.clientY,
+    trigger,
+  };
+  contextMenuOpen.value = true;
+}
+
+function handleProjectKeydown(event: KeyboardEvent, project: ProjectInfo) {
+  if (
+    event.isComposing ||
+    (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10'))
+  )
+    return;
+  event.preventDefault();
+  event.stopPropagation();
+  openProjectMenu(event, project);
+}
+
+function canEditProject(project: ProjectInfo) {
+  return (
+    active &&
+    !loading.value &&
+    !creating.value &&
+    !busy.value &&
+    currentTeam.value?.team_key === project.team_key &&
+    projects.value.some(
+      (item) => item.project_key === project.project_key && permission.project(item).write
+    )
+  );
+}
+
+function selectProjectMenu(item: ContextMenuOption) {
+  const project = contextProject.value;
+  if (!project || !canEditProject(project)) return;
+  if (item.value === 'rename' || item.value === 'create-folder') {
+    openProjectInput(project, item.value);
+  } else if (item.value === 'delete') {
+    void removeProject(project);
+  }
+}
+
+function openProjectInput(project: ProjectInfo, action: 'rename' | 'create-folder') {
+  const rename = action === 'rename';
+  const from = route.fullPath;
+  const trigger = contextMenu.value?.trigger ?? null;
+  modal.showModal(ModalType.INPUT_DIALOG, {
+    title: rename ? '重命名项目' : '新建文件夹',
+    tips: rename ? '项目名称' : `文件夹名称（项目：${project.name}）`,
+    defaultValue: rename ? project.name : undefined,
+    okText: rename ? '保存' : '创建',
+    onOK: async (name) => {
+      if (!canEditProject(project) || route.fullPath !== from) {
+        throw new Error('项目状态已变化，请关闭弹窗后重试');
+      }
+      busy.value = true;
+      try {
+        if (rename) await renameProject(project.project_key, name);
+        else await createFolder({ project_key: project.project_key, parent_key: null, name });
+        if (active) focusAfterRefresh = { target: trigger, location: from };
+        teams.invalidateProjects();
+        if (active) notification.show(rename ? '项目名称已更新' : '文件夹已创建', 'success');
+      } finally {
+        busy.value = false;
+      }
+    },
+  });
+}
+
+async function removeProject(project: ProjectInfo) {
+  if (!canEditProject(project)) return;
+  const from = route.fullPath;
+  const trigger = contextMenu.value?.trigger;
+  let restoreFocus = false;
+  busy.value = true;
+  try {
+    const accepted = await confirm({
+      type: MessageType.ERROR,
+      title: '彻底删除项目',
+      content: `彻底删除项目「${project.name}」？项目内的全部文件夹、文件、附件关联和回收站内容将一并删除，分享链接将失效。项目不会进入回收站，此操作无法恢复。`,
+      confirmText: '彻底删除项目',
+    });
+    busy.value = false;
+    if (!accepted || !canEditProject(project) || route.fullPath !== from) return;
+    busy.value = true;
+    await deleteProject(project.project_key, true);
+    if (active) {
+      restoreFocus = route.fullPath === from;
+      if (currentTeam.value?.team_key === project.team_key) {
+        controller?.abort();
+        projects.value = projects.value.filter((item) => item.project_key !== project.project_key);
+        loading.value = false;
+        error.value = '';
+      }
+      notification.show('项目已彻底删除', 'success');
+      if (restoreFocus && projectKey.value === project.project_key) {
+        try {
+          await router.replace({ name: 'recent', query: { team_key: project.team_key } });
+        } catch (cause) {
+          notification.show(errorMessage(cause, '项目已删除，请从侧栏选择其他项目'), 'error');
+        }
+      }
+    }
+    teams.invalidateProjects();
+  } catch (cause) {
+    if (active) notification.show(errorMessage(cause, '删除项目失败'), 'error', 0);
+  } finally {
+    busy.value = false;
+    if (active) {
+      await nextTick();
+      if (document.activeElement === document.body) {
+        if (restoreFocus) projectSection.value?.focus({ preventScroll: true });
+        else if (route.fullPath === from && trigger?.isConnected && !trigger.matches(':disabled')) {
+          trigger.focus({ preventScroll: true });
+        }
+      }
+    }
+  }
+}
 
 async function loadProjects() {
   controller?.abort();
@@ -187,13 +434,28 @@ async function loadProjects() {
   } catch (cause) {
     if (!signal.aborted) error.value = errorMessage(cause, '项目加载失败');
   } finally {
-    if (!signal.aborted) loading.value = false;
+    if (!signal.aborted) {
+      loading.value = false;
+      await nextTick();
+      const focus = focusAfterRefresh;
+      focusAfterRefresh = undefined;
+      if (
+        active &&
+        focus?.location === route.fullPath &&
+        document.activeElement === document.body &&
+        focus.target?.isConnected &&
+        !focus.target.matches(':disabled')
+      ) {
+        focus.target.focus({ preventScroll: true });
+      }
+    }
   }
 }
 
 function openCreateProject() {
   const selected = currentTeam.value;
-  if (!active || loading.value || creating.value || !selected?.permissions.write) return;
+  if (!active || loading.value || creating.value || busy.value || !selected?.permissions.write)
+    return;
   modal.showModal(ModalType.INPUT_DIALOG, {
     title: '创建项目',
     tips: '项目名称',
@@ -233,12 +495,14 @@ function openCreateProject() {
 async function switchTeam(event: Event) {
   const input = event.target as HTMLSelectElement;
   await router.push({
-    name: 'project',
-    params: { projectId: '', folderId: '' },
+    name: route.name === 'trash' ? 'trash' : 'recent',
     query: { team_key: input.value },
   });
   input.value = currentTeam.value?.team_key ?? '';
 }
+watch([() => route.fullPath, loading, creating, busy], () => {
+  contextMenuOpen.value = false;
+});
 watch([projectKey, () => route.query.team_key, () => teams.projectRevision], loadProjects, {
   immediate: true,
 });
@@ -249,6 +513,7 @@ onBeforeUnmount(() => {
 
 const mainItems = [
   { label: '最近文件', icon: 'clock-outline', routeName: 'recent' },
+  { label: '回收站', icon: 'trash', routeName: 'trash' },
   { label: '团队与成员', icon: 'users', routeName: 'teams' },
   // { label: 'Pulse', icon: 'pulse' },
   // { label: 'Inbox', icon: 'inbox' },
@@ -420,6 +685,59 @@ const mainItems = [
 
 .home-aside__item--active
   background var(--color-bg-translucent)
+
+.home-aside__project-item
+  position relative
+
+  &:hover .home-aside__project,
+  &--context .home-aside__project
+    background var(--color-bg-translucent)
+    color var(--color-text-primary)
+
+  &:hover .home-aside__project-menu,
+  &:focus-within .home-aside__project-menu,
+  &--context .home-aside__project-menu
+    opacity 1
+    pointer-events auto
+
+.home-aside__project
+  padding-right 32px
+
+.home-aside__project-menu
+  position absolute
+  top 50%
+  right 2px
+  transform translateY(-50%)
+  display flex
+  align-items center
+  justify-content center
+  width 24px
+  height 24px
+  border-radius var(--border-radius-item-s)
+  color var(--color-text-tertiary)
+  opacity 0
+  pointer-events none
+  cursor pointer
+
+  &:hover:not(:disabled)
+    background var(--color-bg-quaternary)
+    color var(--color-text-primary)
+
+  &:active:not(:disabled)
+    background var(--color-bg-translucent)
+
+  &:focus-visible
+    outline 2px solid var(--color-accent)
+    outline-offset -2px
+
+  &:disabled
+    cursor not-allowed
+    color var(--color-text-quaternary)
+
+@media (hover: none), (pointer: coarse)
+  .home-aside__project-menu
+    opacity 1
+    pointer-events auto
 
 .home-aside__nav-link,
 .home-aside__project

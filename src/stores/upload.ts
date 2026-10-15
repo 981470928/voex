@@ -19,14 +19,12 @@ export const useUploadStore = defineStore('upload', () => {
   const notification = useNotificationStore();
 
   async function uploadFiles(
-    files: FileList,
+    files: FileList | File[],
     docKey: string,
     onComplete?: () => void | Promise<void>
   ): Promise<FileInfo[]> {
     const tasks: Array<{ file: File; item: UploadItem }> = [];
-    for (let i = 0; i < files.length; i++) {
-      const file = files.item(i);
-      if (!file) continue;
+    for (const file of Array.from(files)) {
       // 补全文件后缀（如果没有后缀且有 mimeType）
       const fileName = ensureFileExtension(file.name, file.type || undefined);
       tasks.push({

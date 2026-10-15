@@ -1,13 +1,16 @@
 <template>
   <main class="shared-file">
     <header class="shared-file__header">
-      <span class="shared-file__brand">Voex</span>
+      <RouterLink v-if="recentKey" class="shared-file__button" :to="{ name: 'recent' }"
+        >最近文件</RouterLink
+      >
+      <span v-else class="shared-file__brand">Voex</span>
       <h1>{{ file?.file_name || '分享文件' }}</h1>
       <span v-if="file" class="shared-file__permission">{{
-        file.permissions.write ? '可编辑' : '只读'
+        fileAccess.write ? '可编辑' : '只读'
       }}</span>
       <button
-        v-if="file?.permissions.write"
+        v-if="fileAccess.write"
         type="button"
         class="shared-file__button shared-file__button--primary"
         :disabled="!ready || !dirty || saving || conflict || composing || blocked"
@@ -18,8 +21,8 @@
       </button>
     </header>
     <div v-if="loading || loadError" class="shared-file__state">
-      <h2>{{ loading ? '正在打开文件…' : '无法打开分享文件' }}</h2>
-      <p :role="loadError ? 'alert' : 'status'">{{ loadError || '正在检查链接并加载正文' }}</p>
+      <h2>{{ loading ? '正在打开文件…' : '无法打开文件' }}</h2>
+      <p :role="loadError ? 'alert' : 'status'">{{ loadError || '正在检查访问权限并加载正文' }}</p>
       <button v-if="loadError" type="button" class="shared-file__button" @click="load">
         重新加载
       </button>
@@ -36,9 +39,9 @@
             ? '正在保存'
             : dirty
               ? '有未保存的修改'
-              : file.permissions.write
+              : fileAccess.write
                 ? '修改后请点击保存'
-                : '此链接仅允许阅读'
+                : '当前权限仅允许阅读'
         }}</span>
       </div>
       <div v-if="saveError" class="shared-file__notice" role="alert">
@@ -77,9 +80,11 @@
           <MilkdownEditor
             ref="editor"
             :default-value="file.file_content ?? ''"
+            :document-key="file.file_key"
             :attachments="file.attachments"
             :allow-attachments="false"
-            :readonly="!file.permissions.write || blocked"
+            :load-image="loadImage"
+            :readonly="!fileAccess.write || blocked"
             :on-preview-attachment="previewAttachment"
             @ready="onReady"
             @change="content = $event"
@@ -129,19 +134,25 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import DownloadQueue from '@/components/DownloadQueue.vue';
-import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router';
+import { onBeforeRouteLeave, onBeforeRouteUpdate, RouterLink, useRoute } from 'vue-router';
 import { isAxiosError } from 'axios';
 import { MilkdownProvider } from '@milkdown/vue';
 import MilkdownEditor from '@/components/milkdown/MilkdownEditor.vue';
 import LocalDraftDialog from '@/components/share/LocalDraftDialog.vue';
 import { useConfirm } from '@/composables/useConfirm';
 import { useNotificationStore } from '@/stores/notification';
+import { usePermissionStore } from '@/stores/permission';
 import { usePreviewerStore } from '@/stores/previewer';
 import { useDownloadStore } from '@/stores/download';
 import { MessageType } from '@/constant/status';
 import { errorMessage } from '@/utils/error';
 import { formatTime } from '@/utils/workspace';
 import type { FileInfo } from '@/service/api/document-api';
+import {
+  getRecentFile,
+  updateRecentFile,
+  downloadRecentAttachment,
+} from '@/service/api/recent-api';
 import {
   downloadSharedAttachment,
   getSharedFile,
@@ -151,11 +162,16 @@ import {
 } from '@/service/api/share-api';
 
 const route = useRoute();
+const recentKey = computed(() =>
+  route.name === 'recent-file' ? String(route.params.file_key ?? '') : ''
+);
 const { confirm } = useConfirm();
 const notification = useNotificationStore();
 const previewer = usePreviewerStore();
 const downloadStore = useDownloadStore();
 const file = ref<SharedFile | null>(null);
+const permission = usePermissionStore();
+const fileAccess = computed(() => permission.shared(file.value));
 const loading = ref(true);
 const loadError = ref('');
 const saveError = ref('');
@@ -202,6 +218,7 @@ async function load() {
   const request = new AbortController();
   controller = request;
   const current = ++generation;
+  const key = recentKey.value;
   token = parseToken();
   loading.value = true;
   document.title = '正在打开分享文件 · Voex';
@@ -215,24 +232,29 @@ async function load() {
   ready.value = false;
   previewer.close();
   try {
-    if (!token || token.length > 512) throw new Error('分享链接无效，请联系分享者获取完整链接。');
-    if (!optionalSessionAttempted) {
+    if (!key && (!token || token.length > 512))
+      throw new Error('分享链接无效，请联系分享者获取完整链接。');
+    if (!key && !optionalSessionAttempted) {
       optionalSessionAttempted = true;
       await restoreOptionalShareSession();
     }
     if (request.signal.aborted) return;
-    const result = await getSharedFile(token, request.signal);
+    const result = key
+      ? await getRecentFile(key, request.signal)
+      : await getSharedFile(token, request.signal);
     if (request.signal.aborted || current !== generation) return;
     file.value = result;
     content.value = result.file_content ?? '';
     savedContent.value = content.value;
     editorVersion.value++;
-    document.title = `${result.file_name} · 分享 · Voex`;
+    document.title = `${result.file_name} · ${key ? '最近文件' : '分享'} · Voex`;
   } catch (cause) {
     if (request.signal.aborted || current !== generation) return;
     loadError.value =
-      isAxiosError(cause) && cause.response?.status === 404
-        ? '分享链接已失效或被撤销，请联系分享者。'
+      isAxiosError(cause) && (cause.response?.status === 404 || cause.response?.status === 403)
+        ? key
+          ? '查看记录已移除或访问权限已失效，请从原文件或有效分享链接重新打开。'
+          : '分享链接已失效或被撤销，请联系分享者。'
         : errorMessage(cause, '文件加载失败，请重试');
     document.title = '分享文件不可用 · Voex';
   } finally {
@@ -248,7 +270,8 @@ function onReady(markdown: string) {
 
 async function save() {
   if (
-    !file.value?.permissions.write ||
+    !file.value ||
+    !fileAccess.value.write ||
     saving.value ||
     conflict.value ||
     composing.value ||
@@ -263,8 +286,10 @@ async function save() {
   saving.value = true;
   saveError.value = '';
   try {
-    await restoreOptionalShareSession();
-    const result = await updateSharedFile(token, snapshot, file.value.revision);
+    if (!recentKey.value) await restoreOptionalShareSession();
+    const result = recentKey.value
+      ? await updateRecentFile(recentKey.value, snapshot, file.value.revision)
+      : await updateSharedFile(token, snapshot, file.value.revision);
     if (disposed || current !== generation) return;
     if (!result.success) throw new Error('保存未完成，修改已保留，请重试。');
     file.value.revision = result.revision;
@@ -319,7 +344,11 @@ async function mayLeave() {
   }
 }
 onBeforeRouteLeave(mayLeave);
-onBeforeRouteUpdate((to, from) => (to.hash !== from.hash ? mayLeave() : true));
+onBeforeRouteUpdate((to, from) =>
+  to.hash !== from.hash || to.params.file_key !== from.params.file_key || to.name !== from.name
+    ? mayLeave()
+    : true
+);
 
 function beforeUnload(event: BeforeUnloadEvent) {
   if (!dirty.value && !saving.value) return;
@@ -339,9 +368,10 @@ async function previewAttachment(attachment: FileInfo) {
   attachmentBusy.value = attachment.hash;
   attachmentError.value = '';
   try {
-    const blob = await downloadSharedAttachment(token, attachment.hash, {
-      signal: controller?.signal,
-    });
+    const options = { signal: controller?.signal };
+    const blob = recentKey.value
+      ? await downloadRecentAttachment(recentKey.value, attachment.hash, options)
+      : await downloadSharedAttachment(token, attachment.hash, options);
     if (disposed || current !== generation) return;
     previewer.file = new File([blob], attachment.name, { type: attachment.mime });
     previewer.visible = true;
@@ -354,13 +384,21 @@ async function previewAttachment(attachment: FileInfo) {
     if (current === generation) attachmentBusy.value = '';
   }
 }
+function loadImage(hash: string, signal: AbortSignal): Promise<Blob> {
+  return recentKey.value
+    ? downloadRecentAttachment(recentKey.value, hash, { signal })
+    : downloadSharedAttachment(token, hash, { signal });
+}
 function downloadAttachment(attachment: FileInfo) {
   if (blocked.value || !file.value?.attachments.some((item) => item.hash === attachment.hash))
     return;
-  downloadStore.enqueue(attachment, { kind: 'share', token });
+  downloadStore.enqueue(
+    attachment,
+    recentKey.value ? { kind: 'recent', fileKey: recentKey.value } : { kind: 'share', token }
+  );
 }
 
-watch(() => route.hash, load, { immediate: true });
+watch([() => route.hash, recentKey], load, { immediate: true });
 onBeforeUnmount(() => {
   disposed = true;
   generation++;
@@ -453,6 +491,7 @@ onBeforeUnmount(() => {
     background var(--color-bg-panel)
     color var(--color-text-primary)
     font-size 13px
+    text-decoration none
     cursor pointer
     &:hover:not(:disabled)
       border-color var(--color-accent)

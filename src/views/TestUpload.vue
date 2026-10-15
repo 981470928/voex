@@ -6,11 +6,11 @@
     <section class="card">
       <h2>文档管理</h2>
       <div class="row">
-        <input v-model="docName" placeholder="文档名称 (默认 untitled.md)" />
+        <input v-model="docName" placeholder="文档名称 (默认 untitled)" />
         <button @click="handleCreateDoc">创建文档</button>
       </div>
       <div v-if="currentKey" class="info">
-        当前文档: <code>{{ currentKey }}</code> ({{ docName || 'untitled.md' }})
+        当前文档: <code>{{ currentKey }}</code> ({{ docName || 'untitled' }})
       </div>
     </section>
 
@@ -18,7 +18,12 @@
     <section class="card">
       <h2>文件上传</h2>
       <div class="row">
-        <input ref="fileInput" type="file" @change="onFileChange" />
+        <button type="button" :disabled="uploading || choosing" @click="chooseFile">
+          选择文件
+        </button>
+        <span class="test-upload__filename" :title="selectedFile?.name" aria-live="polite">
+          {{ selectedFile?.name || '未选择文件' }}
+        </span>
         <button :disabled="!currentKey || !selectedFile || uploading" @click="handleUpload">
           {{ uploading ? '上传中...' : '上传' }}
         </button>
@@ -77,12 +82,13 @@ import type { UploadProgress } from '@/service/api/upload-api';
 import { errorMessage } from '@/utils/error';
 import { useNotificationStore } from '@/stores/notification';
 import { useDownloadStore } from '@/stores/download';
+import { FILE_ACCEPT, originalGetImportFiles } from '@/utils/dom';
 const notification = useNotificationStore();
 const downloadStore = useDownloadStore();
 
 const docName = ref('');
 const currentKey = ref('');
-const fileInput = ref<HTMLInputElement | null>(null);
+const choosing = ref(false);
 const selectedFile = ref<File | null>(null);
 const uploading = ref(false);
 const uploadPercent = ref(0);
@@ -90,9 +96,17 @@ const lastHash = ref('');
 const progressInfo = ref<UploadProgress | null>(null);
 const fileList = ref<FileInfo[]>([]);
 
-function onFileChange(e: Event) {
-  const input = e.target as HTMLInputElement;
-  selectedFile.value = input.files?.[0] || null;
+async function chooseFile() {
+  if (uploading.value || choosing.value) return;
+  choosing.value = true;
+  try {
+    const [file] = await originalGetImportFiles(FILE_ACCEPT.ALL, false);
+    if (file) selectedFile.value = file;
+  } catch (cause) {
+    notification.show(errorMessage(cause, '无法选择文件，请重试'), 'error');
+  } finally {
+    choosing.value = false;
+  }
 }
 
 /** 创建文档 */
@@ -198,8 +212,12 @@ h2
     border-radius 6px
     font-size 14px
 
-  input[type="file"]
-    font-size 14px
+.test-upload__filename
+  min-width 0
+  overflow hidden
+  text-overflow ellipsis
+  white-space nowrap
+  font-size 14px
 
 button
   padding 8px 16px

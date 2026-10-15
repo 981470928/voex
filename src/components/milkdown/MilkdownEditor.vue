@@ -16,6 +16,7 @@
         :title="action.label"
         :aria-label="action.label"
         :aria-pressed="action.active ? !!toolbarState[action.id]?.active : undefined"
+        :aria-haspopup="action.opensDialog ? 'dialog' : undefined"
         :disabled="!ready || toolbarState[action.id]?.enabled === false"
         @mousedown.prevent
         @click="runAction(action)"
@@ -23,6 +24,49 @@
         {{ action.text }}
       </button>
       <span v-if="allowAttachments" class="milkdown-editor__separator" aria-hidden="true" />
+      <button
+        type="button"
+        class="milkdown-editor__action"
+        :disabled="!ready"
+        title="插入表情"
+        aria-haspopup="dialog"
+        @mousedown.prevent
+        @click="openEmoji"
+      >
+        表情
+      </button>
+      <button
+        type="button"
+        class="milkdown-editor__action"
+        :disabled="!ready"
+        aria-haspopup="dialog"
+        @mousedown.prevent
+        @click="openPexels"
+      >
+        图库
+      </button>
+      <button
+        type="button"
+        class="milkdown-editor__action"
+        :disabled="!ready"
+        title="插入或编辑 LaTeX 公式"
+        aria-haspopup="dialog"
+        @mousedown.prevent
+        @click="openLatex()"
+      >
+        公式
+      </button>
+      <button
+        type="button"
+        class="milkdown-editor__action"
+        :disabled="!ready"
+        title="插入或编辑流程图"
+        aria-haspopup="dialog"
+        @mousedown.prevent
+        @click="openMermaid()"
+      >
+        流程图
+      </button>
       <button
         v-if="allowAttachments"
         type="button"
@@ -36,11 +80,27 @@
       </button>
     </div>
     <Milkdown />
+    <EmojiDialog v-if="emojiSelection" @select="insertEmoji" @close="closeEmoji" />
+    <PexelsDialog v-if="pexelsSelection" :on-insert="insertPexelsPhoto" @close="closePexels" />
+    <LatexDialog
+      v-if="latexSelection"
+      :initial="latexSelection.initial"
+      :editing="latexSelection.editing"
+      :on-insert="insertLatex"
+      @close="closeLatex"
+    />
+    <MermaidDialog
+      v-if="mermaidSelection"
+      :initial="mermaidSelection.initial"
+      :editing="mermaidSelection.editing"
+      :on-insert="insertMermaid"
+      @close="closeMermaid"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref, shallowRef, watch } from 'vue';
+import { nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import {
   Editor,
   EditorStatus,
@@ -48,6 +108,8 @@ import {
   editorViewCtx,
   editorViewOptionsCtx,
   rootCtx,
+  parserCtx,
+  serializerCtx,
 } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { commonmark } from '@milkdown/kit/preset/commonmark';
@@ -75,6 +137,27 @@ import {
   type AttachmentExtension,
 } from '@/components/milkdown/attachment';
 import { createEditorContent } from '@/components/milkdown/editor-content';
+import { createEditorPaste } from '@/components/milkdown/editor-paste';
+import {
+  createImageImport,
+  createImportedImage,
+  imageAttachmentHash,
+} from '@/components/milkdown/image-import';
+import { TextSelection } from '@milkdown/kit/prose/state';
+import { createEmojiExtension } from '@/components/milkdown/emoji';
+import EmojiDialog from '@/components/milkdown/EmojiDialog.vue';
+import type { Emoji } from '@/constant/emoji';
+import PexelsDialog from '@/components/milkdown/PexelsDialog.vue';
+import type { PexelsPhoto } from '@/service/api/pexels-api';
+import LatexDialog from '@/components/milkdown/LatexDialog.vue';
+import { createLatexExtension, type LatexAttrs } from '@/components/milkdown/latex';
+import MermaidDialog from '@/components/milkdown/MermaidDialog.vue';
+import { createMermaidExtension } from '@/components/milkdown/mermaid';
+import {
+  createTextColorExtension,
+  normalizeHexColor,
+  type TextColorKind,
+} from '@/components/milkdown/text-color';
 import {
   createEditorInteractions,
   createFormattingActions,
@@ -86,6 +169,9 @@ const props = withDefaults(
     defaultValue?: string;
     attachments?: FileInfo[];
     uploadAttachments?: () => Promise<FileInfo[]>;
+    importImages?: (files: File[]) => Promise<FileInfo[]>;
+    loadImage?: (hash: string, signal: AbortSignal, documentKey?: string) => Promise<Blob>;
+    documentKey?: string;
     allowAttachments?: boolean;
     onPreviewAttachment?: (file: FileInfo) => void;
     readonly?: boolean;
@@ -95,6 +181,9 @@ const props = withDefaults(
     defaultValue: '',
     attachments: () => [],
     uploadAttachments: undefined,
+    importImages: undefined,
+    loadImage: undefined,
+    documentKey: '',
     allowAttachments: true,
     onPreviewAttachment: undefined,
     readonly: false,
@@ -116,18 +205,99 @@ const modal = useModalStore();
 const notification = useNotificationStore();
 const pendingAttachments: FileInfo[] = [];
 const bookmarks = new Map<symbol, SelectionBookmark>();
+const emojiSelection = shallowRef<{ key: symbol; editor: Editor; version: number } | null>(null);
+const pexelsSelection = shallowRef<{ key: symbol; editor: Editor; version: number } | null>(null);
+const latexSelection = shallowRef<{
+  key: symbol;
+  editor: Editor;
+  version: number;
+  initial?: LatexAttrs;
+  editing: boolean;
+} | null>(null);
+const mermaidSelection = shallowRef<{
+  key: symbol;
+  editor: Editor;
+  version: number;
+  initial?: string;
+  editing: boolean;
+} | null>(null);
 let disposed = false;
 let readonlyVersion = 0;
+let publishedMarkdown = props.defaultValue;
 
+const imageImport = createImageImport({
+  readonly: () => props.readonly,
+  attachments: () => props.attachments,
+  documentKey: () => props.documentKey,
+  importFiles: (files) => {
+    if (!props.importImages) throw new Error('当前页面不支持图片导入');
+    return props.importImages(files);
+  },
+  loadImage: (hash, signal, documentKey) => {
+    if (!props.loadImage) throw new Error('当前页面无法读取图片附件');
+    return props.loadImage(hash, signal, documentKey);
+  },
+});
+const paste = createEditorPaste({
+  readonly: () => props.readonly,
+  onError: (message) => notification.show(message, 'error'),
+  importImages: imageImport.importImages,
+  importSource: imageImport.importSource,
+});
 const content = createEditorContent({
   readonly: () => props.readonly,
   onError: (message) => notification.show(message, 'error'),
+  imageImport: imageImport,
+  onAttachment: (view, pos, node) => {
+    const hash = imageAttachmentHash(node.attrs.src);
+    const file = props.attachments.find((file) => file.hash === hash);
+    const type = view.state.schema.nodes.attachment;
+    if (!file || !type || props.readonly) return;
+    view.dispatch(
+      view.state.tr.replaceRangeWith(pos, pos + node.nodeSize, type.create(file)).scrollIntoView()
+    );
+    view.focus();
+  },
+});
+const emojiExtension = createEmojiExtension();
+const latexExtension = createLatexExtension({ readonly: () => props.readonly, onEdit: openLatex });
+const mermaidExtension = createMermaidExtension({
+  readonly: () => props.readonly,
+  onEdit: openMermaid,
+});
+const textColors = createTextColorExtension();
+const colorActions: EditorAction[] = (['textColor', 'highlight'] as const).flatMap((kind) => {
+  const label = kind === 'textColor' ? '文字颜色' : '背景色';
+  return [
+    {
+      id: kind,
+      label,
+      text: label,
+      opensDialog: true,
+      enabled: (ctx: Ctx) => textColors.enabled(ctx, kind),
+      active: (ctx: Ctx) => textColors.active(ctx, kind),
+      run: () => editTextColor(kind),
+    },
+    {
+      id: `${kind}-clear`,
+      label: `清除${label}`,
+      text: `清除${label}`,
+      enabled: (ctx: Ctx) => textColors.enabled(ctx, kind) && textColors.active(ctx, kind),
+      run: (ctx: Ctx) => {
+        textColors.apply(ctx, kind, null);
+        publishMarkdown(serializeMarkdown()(ctx));
+        ctx.get(editorViewCtx).focus();
+      },
+    },
+  ];
 });
 const interactions = createEditorInteractions({
   readonly: () => props.readonly,
   allowAttachments: () => props.allowAttachments,
   onAttachment: () => void uploadAndInsertAttachments(),
   onLink: editLink,
+  onPexels: openPexels,
+  colorActions,
 });
 const toolbarActions: EditorAction[] = [
   ...[
@@ -144,10 +314,17 @@ const toolbarActions: EditorAction[] = [
     enabled: (ctx: Ctx) => command(ctx.get(editorViewCtx).state),
   })),
   ...createFormattingActions(editLink),
+  ...colorActions,
 ];
 
 function canEdit(editor = editorRef.value): editor is Editor {
   return !disposed && !props.readonly && editor?.status === EditorStatus.Created;
+}
+
+function publishMarkdown(markdown: string) {
+  if (disposed || !ready.value || markdown === publishedMarkdown) return;
+  publishedMarkdown = markdown;
+  emit('change', markdown);
 }
 
 function refreshToolbar(ctx: Ctx) {
@@ -165,7 +342,7 @@ function runAction(action: EditorAction) {
   editor.action((ctx) => {
     if (action.enabled?.(ctx) === false) return;
     action.run(ctx);
-    if (action.id !== 'link') ctx.get(editorViewCtx).focus();
+    if (!action.opensDialog) ctx.get(editorViewCtx).focus();
     refreshToolbar(ctx);
   });
 }
@@ -200,6 +377,200 @@ function restoreSelection(ctx: Ctx, key: symbol) {
   view.dispatch(view.state.tr.setSelection(bookmark.resolve(view.state.doc)));
 }
 
+function openEmoji() {
+  const editor = editorRef.value;
+  if (!canEdit(editor) || emojiSelection.value) return;
+  interactions.hide();
+  emojiSelection.value = { key: rememberSelection(editor), editor, version: readonlyVersion };
+}
+
+function closeEmoji() {
+  const session = emojiSelection.value;
+  if (!session) return;
+  bookmarks.delete(session.key);
+  emojiSelection.value = null;
+  void nextTick(() => {
+    if (canEdit(session.editor) && session.editor === editorRef.value)
+      session.editor.action((ctx) => ctx.get(editorViewCtx).focus());
+  });
+}
+
+function insertEmoji(emoji: Emoji) {
+  const session = emojiSelection.value;
+  if (
+    !session ||
+    !canEdit(session.editor) ||
+    session.editor !== editorRef.value ||
+    session.version !== readonlyVersion
+  ) {
+    closeEmoji();
+    return;
+  }
+  try {
+    session.editor.action((ctx) => {
+      restoreSelection(ctx, session.key);
+      emojiExtension.insert(ctx, emoji);
+    });
+    closeEmoji();
+  } catch (cause) {
+    notification.show(errorMessage(cause, '表情插入失败，请将光标移到正文后重试'), 'error');
+  }
+}
+
+function openLatex(position?: number) {
+  const editor = editorRef.value;
+  if (!canEdit(editor) || latexSelection.value) return;
+  interactions.hide();
+  const initial = editor.action((ctx) => {
+    if (position !== undefined) latexExtension.select(ctx, position);
+    return latexExtension.selected(ctx);
+  });
+  latexSelection.value = {
+    key: rememberSelection(editor),
+    editor,
+    version: readonlyVersion,
+    initial: initial ?? undefined,
+    editing: !!initial,
+  };
+}
+
+function closeLatex() {
+  const session = latexSelection.value;
+  if (!session) return;
+  bookmarks.delete(session.key);
+  latexSelection.value = null;
+  void nextTick(() => {
+    if (canEdit(session.editor) && session.editor === editorRef.value)
+      session.editor.action((ctx) => ctx.get(editorViewCtx).focus());
+  });
+}
+
+function insertLatex(attrs: LatexAttrs) {
+  const session = latexSelection.value;
+  if (
+    !session ||
+    !canEdit(session.editor) ||
+    session.editor !== editorRef.value ||
+    session.version !== readonlyVersion
+  )
+    throw new Error('当前文档不可编辑，请关闭弹窗后重试');
+  session.editor.action((ctx) => {
+    restoreSelection(ctx, session.key);
+    latexExtension.insert(ctx, attrs, session.editing);
+  });
+  // 公式参数提交后立即更新保存快照，避免防抖期间仍显示旧的“修改已保存”。
+  publishMarkdown(session.editor.action(serializeMarkdown()));
+}
+
+function openMermaid(position?: number) {
+  const editor = editorRef.value;
+  if (!canEdit(editor) || mermaidSelection.value) return;
+  interactions.hide();
+  const initial = editor.action((ctx) => {
+    if (position !== undefined) mermaidExtension.select(ctx, position);
+    return mermaidExtension.selected(ctx);
+  });
+  mermaidSelection.value = {
+    key: rememberSelection(editor),
+    editor,
+    version: readonlyVersion,
+    initial: initial ?? undefined,
+    editing: initial !== null,
+  };
+}
+
+function closeMermaid() {
+  const session = mermaidSelection.value;
+  if (!session) return;
+  bookmarks.delete(session.key);
+  mermaidSelection.value = null;
+  void nextTick(() => {
+    if (canEdit(session.editor) && session.editor === editorRef.value)
+      session.editor.action((ctx) => ctx.get(editorViewCtx).focus());
+  });
+}
+
+function insertMermaid(code: string) {
+  const session = mermaidSelection.value;
+  if (
+    !session ||
+    !canEdit(session.editor) ||
+    session.editor !== editorRef.value ||
+    session.version !== readonlyVersion
+  )
+    throw new Error('当前文档不可编辑，请关闭弹窗后重试');
+  session.editor.action((ctx) => {
+    restoreSelection(ctx, session.key);
+    mermaidExtension.insert(ctx, code, session.editing);
+  });
+  publishMarkdown(session.editor.action(serializeMarkdown()));
+}
+
+function openPexels() {
+  const editor = editorRef.value;
+  if (!canEdit(editor) || pexelsSelection.value) return;
+  interactions.hide();
+  pexelsSelection.value = { key: rememberSelection(editor), editor, version: readonlyVersion };
+}
+
+function closePexels() {
+  const session = pexelsSelection.value;
+  if (!session) return;
+  bookmarks.delete(session.key);
+  pexelsSelection.value = null;
+  void nextTick(() => {
+    if (canEdit(session.editor) && session.editor === editorRef.value)
+      session.editor.action((ctx) => ctx.get(editorViewCtx).focus());
+  });
+}
+
+async function insertPexelsPhoto(photo: PexelsPhoto) {
+  const session = pexelsSelection.value;
+  if (
+    !session ||
+    !canEdit(session.editor) ||
+    session.editor !== editorRef.value ||
+    session.version !== readonlyVersion
+  )
+    throw new Error('当前文档不可编辑，请关闭图库后重试');
+  const view = session.editor.action((ctx) => {
+    restoreSelection(ctx, session.key);
+    const view = ctx.get(editorViewCtx);
+    const { state } = view;
+    const image = state.schema.nodes.image;
+    if (
+      !image ||
+      !state.selection.$from.parent.canReplaceWith(
+        state.selection.$from.index(),
+        state.selection.$from.index(),
+        image
+      )
+    )
+      throw new Error('请将光标移到正文段落后插入图片');
+    return view;
+  });
+  const node = await imageImport.importSource(
+    view,
+    view.state.schema.nodes.image!.create({
+      src: photo.src.large2x || photo.src.large || photo.src.original,
+      alt: photo.alt || `${photo.photographer} 的照片`,
+      title: `摄影：${photo.photographer} / Pexels`,
+    })
+  );
+  if (
+    pexelsSelection.value !== session ||
+    !canEdit(session.editor) ||
+    session.version !== readonlyVersion
+  )
+    throw new Error('图片导入已取消');
+  session.editor.action((ctx) => {
+    restoreSelection(ctx, session.key);
+    const view = ctx.get(editorViewCtx);
+    view.dispatch(view.state.tr.replaceSelectionWith(node, false).scrollIntoView());
+  });
+  publishMarkdown(session.editor.action(serializeMarkdown()));
+}
+
 async function uploadAndInsertAttachments() {
   const editor = editorRef.value;
   if (!canEdit(editor) || uploading.value || !props.allowAttachments || !props.uploadAttachments)
@@ -218,7 +589,7 @@ async function uploadAndInsertAttachments() {
       return;
     editor.action((ctx) => {
       restoreSelection(ctx, key);
-      files.forEach((file) => attachmentExtensionRef.value?.insertAttachment(ctx, file));
+      files.forEach((file) => insertImportedFile(ctx, file));
     });
   } catch (cause) {
     if (!disposed) notification.show(errorMessage(cause, '附件上传失败，请重试'), 'error');
@@ -269,12 +640,64 @@ function editLink() {
   });
 }
 
+function editTextColor(kind: TextColorKind) {
+  const editor = editorRef.value;
+  if (!canEdit(editor) || !editor.action((ctx) => textColors.enabled(ctx, kind))) return;
+  const key = rememberSelection(editor);
+  const version = readonlyVersion;
+  const initial = editor.action((ctx) => ({
+    color: textColors.selected(ctx, kind),
+    marks: ctx.get(editorViewCtx).state.storedMarks,
+  }));
+  interactions.hide();
+  modal.showModal(ModalType.INPUT_DIALOG, {
+    title: kind === 'textColor' ? '文字颜色' : '背景色',
+    tips: '输入 HEX 颜色，例如 #F00 或 #FF0000；清除颜色请使用工具栏的清除按钮',
+    defaultValue: initial.color ?? (kind === 'textColor' ? '#FF0000' : '#FFFF00'),
+    okText: '应用',
+    onOK: (value) => {
+      const color = normalizeHexColor(value);
+      if (!color) throw new Error('请输入 #RGB 或 #RRGGBB 格式的 HEX 颜色');
+      if (!canEdit(editor) || editor !== editorRef.value || version !== readonlyVersion)
+        throw new Error('当前文档不可编辑，请关闭弹窗后重试');
+      editor.action((ctx) => {
+        restoreSelection(ctx, key);
+        const view = ctx.get(editorViewCtx);
+        if (view.state.selection.empty && initial.marks)
+          view.dispatch(view.state.tr.setStoredMarks(initial.marks));
+        textColors.apply(ctx, kind, color);
+      });
+      publishMarkdown(editor.action(serializeMarkdown()));
+      bookmarks.delete(key);
+    },
+    onCancel: () => bookmarks.delete(key),
+  });
+}
+
 useEditor((root) => {
   const extension = createAttachmentExtension(
     (hash) => props.attachments.some((file) => file.hash === hash),
     (file) => {
       const attachment = props.attachments.find((item) => item.hash === file.hash);
       if (attachment) props.onPreviewAttachment?.(attachment);
+    },
+    {
+      readonly: () => props.readonly,
+      onImage: (view, pos, hash) => {
+        const file = props.attachments.find((file) => file.hash === hash);
+        const current = view.state.doc.nodeAt(pos);
+        const paragraph = view.state.schema.nodes.paragraph;
+        if (!file || !current || !paragraph || props.readonly) return;
+        const image = createImportedImage(view, file, props.documentKey);
+        const tr = view.state.tr.replaceWith(
+          pos,
+          pos + current.nodeSize,
+          paragraph.create(null, image)
+        );
+        tr.setSelection(TextSelection.near(tr.doc.resolve(pos + 1)));
+        view.dispatch(tr.scrollIntoView());
+        view.focus();
+      },
     }
   );
   attachmentExtensionRef.value = extension;
@@ -312,11 +735,13 @@ useEditor((root) => {
         color: 'var(--editor-accent)',
       }));
       content.configure(ctx);
+      textColors.configure(ctx);
       interactions.configure(ctx);
       ctx.get(listenerCtx).markdownUpdated((_ctx, markdown, previous) => {
-        if (!disposed && ready.value && markdown !== previous) emit('change', markdown);
+        if (markdown !== previous) publishMarkdown(markdown);
       });
     })
+    .use(paste.plugins)
     .use(content.plugins)
     .use(commonmark)
     .use(gfm)
@@ -328,6 +753,10 @@ useEditor((root) => {
     .use(listener)
     .use(indent)
     .use(extension.plugins)
+    .use(emojiExtension.plugins)
+    .use(latexExtension.plugins)
+    .use(mermaidExtension.plugins)
+    .use(textColors.plugins)
     .use(interactions.plugins)
     .use(selectionPlugin);
 
@@ -336,7 +765,8 @@ useEditor((root) => {
     if (status === EditorStatus.Created && !disposed) {
       ready.value = true;
       editor.action(refreshToolbar);
-      emit('ready', editor.action(serializeMarkdown()));
+      publishedMarkdown = editor.action(serializeMarkdown());
+      emit('ready', publishedMarkdown);
       pendingAttachments.splice(0).forEach((file) => insertAttachment(file));
     }
   });
@@ -347,8 +777,17 @@ watch(
   () => props.readonly,
   () => {
     readonlyVersion++;
+    paste.readonlyChanged();
+    imageImport.readonlyChanged();
     content.readonlyChanged();
+    attachmentExtensionRef.value?.refreshAvailability();
+    latexExtension.readonlyChanged();
+    mermaidExtension.readonlyChanged();
     interactions.hide();
+    closeEmoji();
+    closePexels();
+    closeLatex();
+    closeMermaid();
     if (props.readonly) pendingAttachments.length = 0;
     if (editorRef.value?.status === EditorStatus.Created) {
       editorRef.value.action((ctx) => {
@@ -372,11 +811,23 @@ onBeforeUnmount(() => {
   pendingAttachments.length = 0;
   bookmarks.clear();
   content.destroy();
+  paste.destroy();
+  imageImport.destroy();
   interactions.hide();
   attachmentExtensionRef.value = null;
   // Milkdown Vue 负责 editor.destroy()，此处仅清理组件自己的状态。
   editorRef.value = null;
 });
+
+function insertImportedFile(ctx: Ctx, file: FileInfo): boolean {
+  if (!file.mime.startsWith('image/'))
+    return attachmentExtensionRef.value?.insertAttachment(ctx, file) ?? false;
+  const view = ctx.get(editorViewCtx);
+  const node = createImportedImage(view, file, props.documentKey);
+  view.dispatch(view.state.tr.replaceSelectionWith(node, false).scrollIntoView());
+  view.focus();
+  return true;
+}
 
 function insertAttachment(file: FileInfo): boolean {
   if (disposed || props.readonly || !props.allowAttachments) return false;
@@ -388,7 +839,7 @@ function insertAttachment(file: FileInfo): boolean {
   }
 
   try {
-    return editor.action((ctx) => extension.insertAttachment(ctx, file));
+    return editor.action((ctx) => insertImportedFile(ctx, file));
   } catch {
     return false;
   }
@@ -400,10 +851,168 @@ function getMarkdown(): string {
     : props.defaultValue;
 }
 
-defineExpose({ getMarkdown, insertAttachment });
+function normalizeMarkdown(markdown: string): string {
+  const editor = editorRef.value;
+  if (!editor || editor.status !== EditorStatus.Created) throw new Error('编辑器尚未就绪');
+  return editor.action((ctx) => {
+    const document = ctx.get(parserCtx)(markdown);
+    if (!document) throw new Error('文档格式无法解析');
+    return ctx.get(serializerCtx)(document);
+  });
+}
+
+// Used only after an explicitly reviewed save; does not open any insertion dialogs.
+function setMarkdown(markdown: string) {
+  const editor = editorRef.value;
+  if (!editor || editor.status !== EditorStatus.Created) throw new Error('编辑器尚未就绪');
+  editor.action((ctx) => {
+    const document = ctx.get(parserCtx)(markdown);
+    if (!document) throw new Error('文档格式无法解析');
+    content.replaceSavedDocument(ctx, document);
+  });
+  publishMarkdown(editor.action(serializeMarkdown()));
+}
+
+defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
 </script>
 
 <style lang="stylus">
+.milkdown-mermaid
+  position relative
+  box-sizing border-box
+  width 100%
+  min-height 120px
+  margin 12px 0
+  padding 48px 16px 16px
+  border 1px solid var(--color-border-primary)
+  border-radius 6px
+  background var(--color-bg-panel)
+  outline 1px solid transparent
+
+  &.ProseMirror-selectednode
+    outline 2px solid var(--color-accent)
+
+  &[data-state='error'] .milkdown-mermaid__feedback
+    color var(--color-red)
+
+  &__viewport
+    overflow auto
+    text-align center
+    svg
+      display block
+      max-width 100%
+      height auto
+      margin 0 auto
+
+  &__feedback
+    display block
+    padding 16px 0
+    overflow-wrap anywhere
+    white-space pre-wrap
+    font-size 13px
+    color var(--color-text-secondary)
+    &[hidden]
+      display none
+
+  &__edit
+    position absolute
+    top 8px
+    right 8px
+    min-height 30px
+    padding 4px 8px
+    border 1px solid var(--color-border-primary)
+    border-radius 6px
+    background var(--color-bg-panel)
+    color var(--color-text-primary)
+    font-family inherit
+    font-size 12px
+    cursor pointer
+    &:hover:not(:disabled)
+      background var(--color-bg-translucent)
+    &:active:not(:disabled)
+      filter brightness(.9)
+    &:focus-visible
+      outline 2px solid var(--color-accent)
+      outline-offset 2px
+    &:disabled
+      cursor not-allowed
+      opacity .6
+    &[hidden]
+      display none
+
+.milkdown-editor--readonly .milkdown-mermaid
+  padding-top 16px
+
+.milkdown-latex
+  position relative
+  box-sizing border-box
+  width 100%
+  margin 12px 0
+  overflow hidden
+  outline 1px solid transparent
+
+  &.ProseMirror-selectednode
+    outline 2px solid var(--color-accent)
+
+  &__viewport
+    position absolute
+    inset 0
+    display flex
+    align-items center
+    justify-content center
+    overflow hidden
+    svg
+      display block
+      flex-shrink 0
+      max-width none
+      max-height none
+
+  &__feedback
+    position absolute
+    inset 0
+    display flex
+    align-items center
+    justify-content center
+    padding 12px
+    overflow-wrap anywhere
+    font-size 13px
+    text-align center
+    color var(--color-text-secondary)
+    &[hidden]
+      display none
+
+  &__edit
+    position absolute
+    top 6px
+    right 6px
+    min-height 30px
+    padding 4px 8px
+    border 1px solid var(--color-border-primary)
+    border-radius 6px
+    background var(--color-bg-panel)
+    color var(--color-text-primary)
+    font-family inherit
+    font-size 12px
+    cursor pointer
+    opacity 0
+    pointer-events none
+    &:hover:not(:disabled)
+      background var(--color-bg-translucent)
+    &:active:not(:disabled)
+      filter brightness(.9)
+    &:focus-visible
+      outline 2px solid var(--color-accent)
+      outline-offset 2px
+    &:disabled
+      cursor not-allowed
+    &[hidden]
+      display none
+
+  &:hover, &:focus-within, &.ProseMirror-selectednode
+    .milkdown-latex__edit
+      opacity 1
+      pointer-events auto
+
 .milkdown-editor
   --editor-bg: var(--color-bg-primary, #fff)
   --editor-panel: var(--color-bg-panel, #fff)
@@ -650,6 +1259,25 @@ defineExpose({ getMarkdown, insertAttachment });
       border-radius 6px
       vertical-align middle
 
+    .milkdown-emoji
+      display inline-block
+      width 1.1em
+      height 1.1em
+      vertical-align -0.15em
+      line-height 1
+
+      &__image
+        display block
+        width 100%
+        height 100%
+        border-radius 0
+
+      &__fallback
+        display block
+
+      [hidden]
+        display none
+
     table
       display block
       max-width 100%
@@ -697,6 +1325,177 @@ defineExpose({ getMarkdown, insertAttachment });
       outline 2px solid var(--editor-accent)
       outline-offset 2px
 
+  &__image
+    position relative
+    display inline-block
+    max-width 100%
+    vertical-align middle
+    border-radius 6px
+    line-height 0
+
+    &[data-align]
+      display block
+      width fit-content
+
+    &[data-align='left']
+      margin-left 0
+      margin-right auto
+
+    &[data-align='center']
+      margin-left auto
+      margin-right auto
+
+    &[data-align='right']
+      margin-left auto
+      margin-right 0
+
+      .milkdown-editor__image-handle
+        left -7px
+        right auto
+        cursor nesw-resize
+
+    [hidden]
+      display none !important
+
+    &--selected
+      outline 2px solid var(--editor-accent)
+      outline-offset 2px
+
+    &--resizing
+      user-select none
+
+    &:focus-visible
+      outline 2px solid var(--editor-accent)
+      outline-offset 2px
+
+  &__image-media
+    display block
+    width 100%
+    height auto
+
+  &__image-handle
+    position absolute
+    right -7px
+    bottom -7px
+    z-index 2
+    width 20px
+    height 20px
+    padding 0
+    border 2px solid var(--editor-bg)
+    border-radius 5px
+    background var(--editor-accent)
+    color var(--editor-bg)
+    cursor nwse-resize
+    touch-action none
+
+    &:hover
+      filter brightness(1.15)
+
+    &:focus-visible
+      outline 2px solid var(--editor-accent)
+      outline-offset 3px
+
+  &__image-controls
+    position fixed
+    z-index 30
+    display flex
+    align-items center
+    flex-wrap wrap
+    gap 8px
+    width 320px
+    max-width calc(100vw - 24px)
+    padding 8px
+    border 1px solid var(--editor-border)
+    border-radius 6px
+    background var(--editor-panel)
+    box-shadow var(--shadow-medium)
+    color var(--editor-text)
+    font-size 12px
+    line-height 1.5
+
+    input
+      width 76px
+      height 32px
+      padding 0 6px
+      border 1px solid var(--editor-border)
+      border-radius 4px
+      background var(--editor-bg)
+      color var(--editor-text)
+      font-size 12px
+
+      &[aria-invalid='true']
+        border-color var(--color-red)
+
+    button
+      height 32px
+      padding 0 8px
+      border 1px solid var(--editor-border)
+      border-radius 4px
+      color var(--editor-text)
+      background var(--editor-hover)
+      white-space nowrap
+      cursor pointer
+
+      &:hover:not(:disabled)
+        background var(--editor-selected)
+
+      &:active:not(:disabled)
+        filter brightness(.9)
+
+    input, button
+      &:focus-visible
+        outline 2px solid var(--editor-accent)
+        outline-offset 1px
+
+      &:disabled
+        opacity .5
+        cursor not-allowed
+
+  &__image-label
+    display inline-flex
+    align-items center
+    gap 6px
+
+  &__image-alignment
+    display flex
+    flex-basis 100%
+    gap 4px
+    padding-top 6px
+    border-top 1px solid var(--editor-border)
+
+    button
+      flex 1
+
+      &[aria-pressed='true']
+        color var(--editor-accent)
+        background var(--editor-selected)
+        border-color var(--editor-accent)
+
+  &__image-validation
+    flex-basis 100%
+    color var(--color-red)
+    line-height 1.5
+
+  &__image-error
+    display inline-flex
+    align-items center
+    justify-content center
+    min-width 140px
+    min-height 72px
+    padding 12px
+    background var(--editor-hover)
+    color var(--editor-muted)
+    font-size 13px
+    line-height 1.5
+
+  @media (pointer: coarse)
+    &__image-handle
+      width 28px
+      height 28px
+
+    &__image-controls input, &__image-controls button
+      min-height 40px
+
   &__list-content
     min-width 0
 
@@ -731,6 +1530,7 @@ defineExpose({ getMarkdown, insertAttachment });
 
   &__format
     display flex
+    flex-wrap wrap
     gap 2px
     padding 4px
     max-width calc(100vw - 24px)
@@ -868,6 +1668,7 @@ defineExpose({ getMarkdown, insertAttachment });
 .milkdown-attachment
   display flex
   align-items center
+  flex-wrap wrap
   gap 12px
   box-sizing border-box
   width 100%

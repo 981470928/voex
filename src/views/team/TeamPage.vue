@@ -89,8 +89,8 @@
               <button class="team-ui__button" type="button" @click="copyCode">复制编号</button
               ><RouterLink
                 class="team-ui__button"
-                :to="{ name: 'project', query: { team_key: team.team_key } }"
-                >查看项目</RouterLink
+                :to="{ name: 'recent', query: { team_key: team.team_key } }"
+                >返回工作台</RouterLink
               >
             </div>
           </div>

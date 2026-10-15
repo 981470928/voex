@@ -1,1 +1,0 @@
-import{E as e,T as t}from"./index-VPRlIAnY.js";function n(){let n=e();function r(e){return new Promise(r=>{n.showModal(t.CONFIRM,{...e,onOK:()=>r(!0),onCancel:()=>r(!1)})})}return{confirm:r}}export{n as t};

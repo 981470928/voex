@@ -176,7 +176,8 @@ Body: { name }
 Response: { success: true }；要求项目编辑权限
 
 DELETE /api/project/:projectKey
-Response: { success: true }；要求项目编辑权限，仍有文件夹时返回 409
+Query: cascade?: "true" | "false"（默认 false）
+Response: { success: true }；要求项目编辑权限，空项目直接删除；有子项且未确认时返回 409，确认后 cascade=true 连带删除全部子项
 
 POST /api/folder
 Body: { project_key, name, parent_key?: null }
@@ -187,7 +188,8 @@ Body: { name }
 Response: { success: true }；要求项目编辑权限
 
 DELETE /api/folder/:folderKey
-Response: { success: true }；要求项目编辑权限，仍有文件时返回 409
+Query: cascade?: "true" | "false"（默认 false）
+Response: { success: true }；要求项目编辑权限，空文件夹直接删除；有子项且未确认时返回 409，确认后 cascade=true 连带删除全部后代
 
 GET /api/project/:projectKey/privileges
 Response: { mode: "inherit" | "restricted", user_ids: string[] }
@@ -198,6 +200,8 @@ Response: Project，privileges 额外包含 user_ids
 ```
 
 项目授权的 GET/PUT 均要求该团队 owner/admin。`user_ids` 必填，最多 1000 项，服务器去重并核对全部用户属于目标团队；`inherit` 请求使用空数组，返回空数组。`restricted` 的名单与模式在同一事务更新。权限变更与资源写操作共用 workspace 行锁，写入前在事务内重新检查权限，避免移除权限后继续用旧检查结果写入。
+
+项目、文件夹删除的权限校验、子项检查与级联删除均在同一工作区写锁事务内执行。有子项但未传 `cascade=true` 时返回 409，不修改数据；前端据此显示确认，不依赖可能过期的目录缓存。`cascade` 仅接受单个小写 `true` 或 `false`，重复、数组、空值或其他值返回 400。级联范围包含全部后代文件夹、文档、附件关联、分享链接与最近访问记录，删除项目同时清除项目成员记录；任一步失败则全部回滚。共享 R2 哈希对象保留，避免误删其他文档复用的附件内容。本次实现位于本地 Go 服务端项目 `C:/Users/WS/Desktop/voex-server-main`，不涉及上传或部署。
 
 ## 6. 文件正文与 revision
 

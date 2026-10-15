@@ -27,6 +27,7 @@ export interface EditorAction {
   run: (ctx: Ctx) => void;
   active?: (ctx: Ctx) => boolean;
   enabled?: (ctx: Ctx) => boolean;
+  opensDialog?: boolean;
 }
 
 interface EditorInteractionOptions {
@@ -34,6 +35,8 @@ interface EditorInteractionOptions {
   allowAttachments?: () => boolean;
   onAttachment: () => void;
   onLink: () => void;
+  onPexels: () => void;
+  colorActions?: EditorAction[];
 }
 
 interface SlashAction extends EditorAction {
@@ -107,6 +110,7 @@ export function createFormattingActions(onLink: () => void): EditorAction[] {
     },
     {
       id: 'link',
+      opensDialog: true,
       label: '链接',
       text: '链接',
       active: (ctx) => markActive(ctx, 'link'),
@@ -127,7 +131,7 @@ export function createFormattingActions(onLink: () => void): EditorAction[] {
   ];
 }
 
-function createSlashActions(onAttachment: () => void): SlashAction[] {
+function createSlashActions(onAttachment: () => void, onPexels: () => void): SlashAction[] {
   const action = (item: EditorAction, keywords: string, hint: string): SlashAction => ({
     ...item,
     keywords: `${item.label} ${keywords}`.toLowerCase(),
@@ -223,6 +227,19 @@ function createSlashActions(onAttachment: () => void): SlashAction[] {
       },
       'attachment file upload fj',
       '选择文件'
+    ),
+    action(
+      {
+        id: 'pexels',
+        label: 'Pexels 图库',
+        text: '图',
+        run: (ctx) => {
+          const view = ctx.get(editorViewCtx);
+          if (view.editable && !view.isDestroyed) onPexels();
+        },
+      },
+      'image photo picture gallery pexels 图片 图库 tk',
+      '搜索并插入图片'
     ),
   ];
 }
@@ -339,7 +356,10 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
         view: (view) => {
           const element = createPopover(view, 'milkdown-editor__format', '选区格式');
           element.setAttribute('role', 'toolbar');
-          const actions = createFormattingActions(options.onLink);
+          const actions = [
+            ...createFormattingActions(options.onLink),
+            ...(options.colorActions ?? []),
+          ];
           const buttons = actions.map((action) => {
             const button = createButton(
               view.dom.ownerDocument,
@@ -349,6 +369,7 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
             );
             button.dataset.action = action.id;
             button.dataset.format = action.id;
+            if (action.opensDialog) button.setAttribute('aria-haspopup', 'dialog');
             // 鼠标操作保留编辑器选区，键盘仍可正常聚焦按钮。
             button.addEventListener('mousedown', (event) => event.preventDefault());
             button.addEventListener('click', () => {
@@ -471,7 +492,7 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
           const element = createPopover(view, 'milkdown-editor__slash', '插入内容');
           element.setAttribute('role', 'listbox');
           element.id = `milkdown-slash-${id}`;
-          const actions = createSlashActions(options.onAttachment).filter(
+          const actions = createSlashActions(options.onAttachment, options.onPexels).filter(
             (action) => action.id !== 'attachment' || options.allowAttachments?.() !== false
           );
           let filtered: SlashAction[] = [];

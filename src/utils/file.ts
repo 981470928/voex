@@ -67,6 +67,33 @@ const MIME_TO_EXTENSION: Record<string, string> = {
   'application/vnd.android.package-archive': '.apk',
 };
 
+const EXTENSION_TO_MIME: Record<string, string> = {
+  ...Object.fromEntries(
+    Object.entries(MIME_TO_EXTENSION).map(([mime, extension]) => [extension, mime])
+  ),
+  '.jpeg': 'image/jpeg',
+  '.tif': 'image/tiff',
+  '.svgz': 'image/svg+xml',
+  '.md': 'text/markdown',
+  '.markdown': 'text/markdown',
+};
+
+const MIME_ALIASES: Record<string, string> = {
+  'application/xmind': 'application/vnd.xmind.workbook',
+  'image/x-photoshop': 'image/vnd.adobe.photoshop',
+  'application/vnd.openxmlformats-officedocument.drawingml.drawing':
+    'application/vnd.ms-visio.drawing',
+};
+
+/** 补全缺失 MIME、统一已知别名，同时保留文件名、内容和修改时间。 */
+export function fillMimeTypeIfNeed(file: File): File {
+  const type = file.type
+    ? MIME_ALIASES[file.type] || file.type
+    : EXTENSION_TO_MIME[getFileExtension(file.name)];
+  if (!type || type === file.type) return file;
+  return new File([file], file.name, { type, lastModified: file.lastModified });
+}
+
 /**
  * 获取文件扩展名（包含点号）
  * @param filename 文件名

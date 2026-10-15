@@ -6,8 +6,8 @@
         v-show="!keepMounted || modelValue"
         ref="dialogRef"
         v-bind="$attrs"
-        class="voex-modal-mask"
-        :class="{ 'voex-modal-mask--drawer': placement !== 'center' }"
+        class="voex-modal-dialog"
+        :class="{ 'voex-modal-dialog--drawer': placement !== 'center' }"
         :style="viewportStyle"
         aria-modal="true"
         :aria-labelledby="title || $slots.header ? titleId : undefined"
@@ -16,8 +16,8 @@
         @cancel.prevent="handleClose"
         @close="handleNativeClose"
         @keydown="handleKeydown"
-        @click.self="handleMaskClick"
       >
+        <div class="voex-modal-mask" aria-hidden="true" @click.self="handleMaskClick" />
         <div class="voex-modal-wrapper" :class="wrapperClass">
           <div class="voex-modal" :style="modalStyle">
             <!-- Header -->
@@ -320,7 +320,7 @@ function handleMaskClick() {
 </script>
 
 <style scoped lang="stylus">
-.voex-modal-mask
+.voex-modal-dialog
   position fixed
   top var(--voex-modal-viewport-top, 0px)
   left var(--voex-modal-viewport-left, 0px)
@@ -336,7 +336,7 @@ function handleMaskClick() {
   border 0
   color inherit
   font inherit
-  background var(--color-overlay-primary)
+  background transparent
   overflow hidden
 
   &[open]
@@ -345,7 +345,13 @@ function handleMaskClick() {
   &::backdrop
     background transparent
 
+.voex-modal-mask
+  position absolute
+  inset 0
+  background var(--color-overlay-primary)
+
 .voex-modal-wrapper
+  position relative
   display flex
   align-items flex-start
   justify-content center
@@ -455,7 +461,7 @@ function handleMaskClick() {
     padding-bottom unquote('max(16px, env(safe-area-inset-bottom))')
     padding-left unquote('max(12px, env(safe-area-inset-left))')
 
-.voex-modal-mask--drawer
+.voex-modal-dialog--drawer
   .voex-modal-wrapper
     padding 0
     align-items stretch
@@ -507,7 +513,7 @@ function handleMaskClick() {
       transform translateX(100%)
 
 @media (prefers-reduced-motion: reduce)
-  .voex-modal-mask--drawer .voex-modal
+  .voex-modal-dialog--drawer .voex-modal
     transition none
 
   .voex-modal-enter-active,

@@ -7,7 +7,10 @@
     placeholder="怎么称呼你"
     :disabled="disabled"
     :error="errors.name"
+    :hint="hints?.name"
+    :success="hints?.name === '已保存'"
     @update:model-value="update('name', $event)"
+    @blur="$emit('blur', 'name')"
     @composition="$emit('composition', $event)"
   />
   <AuthField
@@ -20,7 +23,10 @@
     optional
     :disabled="disabled"
     :error="errors.email"
+    :hint="hints?.email"
+    :success="hints?.email === '已保存'"
     @update:model-value="update('email', $event)"
+    @blur="$emit('blur', 'email')"
     @composition="$emit('composition', $event)"
   />
   <AuthField
@@ -33,7 +39,10 @@
     optional
     :disabled="disabled"
     :error="errors.phone"
+    :hint="hints?.phone"
+    :success="hints?.phone === '已保存'"
     @update:model-value="update('phone', $event)"
+    @blur="$emit('blur', 'phone')"
     @composition="$emit('composition', $event)"
   />
 </template>
@@ -42,8 +51,17 @@
 import { ref } from 'vue';
 import AuthField from './AuthField.vue';
 type Fields = { name: string; email: string; phone: string };
-const props = defineProps<{ modelValue: Fields; errors: Fields; disabled?: boolean }>();
-const emit = defineEmits<{ 'update:modelValue': [value: Fields]; composition: [value: boolean] }>();
+const props = defineProps<{
+  modelValue: Fields;
+  errors: Fields;
+  hints?: Fields;
+  disabled?: boolean;
+}>();
+const emit = defineEmits<{
+  'update:modelValue': [value: Fields];
+  composition: [value: boolean];
+  blur: [field: keyof Fields];
+}>();
 const nameField = ref<InstanceType<typeof AuthField>>();
 const emailField = ref<InstanceType<typeof AuthField>>();
 const phoneField = ref<InstanceType<typeof AuthField>>();

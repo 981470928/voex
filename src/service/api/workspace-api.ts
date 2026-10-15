@@ -73,8 +73,10 @@ export function renameProject(key: string, name: string) {
   return http.put<ApiError, { success: true }>(`/project/${encodeURIComponent(key)}`, { name });
 }
 
-export function deleteProject(key: string) {
-  return http.delete<ApiError, { success: true }>(`/project/${encodeURIComponent(key)}`);
+export function deleteProject(key: string, cascade = false) {
+  return http.delete<ApiError, { success: true }>(`/project/${encodeURIComponent(key)}`, {
+    params: cascade ? { cascade: true } : undefined,
+  });
 }
 
 export function createFolder(data: {
@@ -89,6 +91,9 @@ export function renameFolder(key: string, name: string) {
   return http.put<ApiError, { success: true }>(`/folder/${encodeURIComponent(key)}`, { name });
 }
 
-export function deleteFolder(key: string) {
-  return http.delete<ApiError, { success: true }>(`/folder/${encodeURIComponent(key)}`);
+/** 将文件夹移入回收站；cascade=true 时一并隐藏其中正常的文档。 */
+export function deleteFolder(key: string, cascade = false) {
+  return http.delete<ApiError, { success: true }>(`/folder/${encodeURIComponent(key)}`, {
+    params: cascade ? { cascade: true } : undefined,
+  });
 }

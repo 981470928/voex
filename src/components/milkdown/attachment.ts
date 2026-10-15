@@ -2,7 +2,7 @@ import { editorViewCtx, remarkPluginsCtx } from '@milkdown/kit/core';
 import type { Ctx, MilkdownPlugin } from '@milkdown/kit/ctx';
 import { Fragment, type Node as ProseMirrorNode } from '@milkdown/kit/prose/model';
 import { TextSelection } from '@milkdown/kit/prose/state';
-import type { NodeView } from '@milkdown/kit/prose/view';
+import type { EditorView, NodeView } from '@milkdown/kit/prose/view';
 import type { MarkdownNode, RemarkPlugin } from '@milkdown/kit/transformer';
 import { $node, $view } from '@milkdown/kit/utils';
 import type { FileInfo } from '@/service/api/document-api';
@@ -132,7 +132,11 @@ function createAttachmentNodeView(
   initialNode: ProseMirrorNode,
   isAvailable: (hash: string) => boolean,
   onPreview: (file: Pick<FileInfo, 'hash' | 'name' | 'mime'>) => void,
-  refreshers: Set<() => void>
+  refreshers: Set<() => void>,
+  imageOptions?: {
+    readonly: () => boolean;
+    onImage: () => void;
+  }
 ): NodeView {
   let node = initialNode;
 
@@ -178,8 +182,19 @@ function createAttachmentNodeView(
     event.stopPropagation();
   });
 
+  const image = document.createElement('button');
+  image.className = 'milkdown-attachment__preview';
+  image.type = 'button';
+  image.textContent = '显示为图片';
+  image.contentEditable = 'false';
+  image.onmousedown = (event) => event.preventDefault();
+  image.onclick = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (imageOptions && !imageOptions.readonly()) imageOptions.onImage();
+  };
   info.append(name, meta, unavailable);
-  dom.append(icon, info, preview);
+  dom.append(icon, info, image, preview);
 
   const refresh = () => {
     const attrs = getNodeAttrs(node);
@@ -188,6 +203,8 @@ function createAttachmentNodeView(
     name.title = attrs.name || '未命名附件';
     meta.textContent = attrs.mime || '未知类型';
     preview.hidden = !available;
+    image.hidden =
+      !available || !attrs.mime.startsWith('image/') || !imageOptions || imageOptions.readonly();
     preview.title = `预览 ${attrs.name || '未命名附件'}`;
     preview.setAttribute('aria-label', `预览 ${attrs.name || '未命名附件'}`);
     unavailable.hidden = available;
@@ -215,7 +232,10 @@ function createAttachmentNodeView(
     stopEvent(event) {
       const target = event.target;
       // 如果事件目标是预览按钮或其子元素，阻止 ProseMirror 处理
-      if (target instanceof globalThis.Node && preview.contains(target)) {
+      if (
+        target instanceof globalThis.Node &&
+        (preview.contains(target) || image.contains(target))
+      ) {
         return true;
       }
       return false;
@@ -225,6 +245,7 @@ function createAttachmentNodeView(
     },
     destroy() {
       refreshers.delete(refresh);
+      image.onclick = image.onmousedown = null;
     },
   };
 }
@@ -293,7 +314,11 @@ export interface AttachmentExtension {
 
 export function createAttachmentExtension(
   isAvailable: (hash: string) => boolean,
-  onPreview: (file: Pick<FileInfo, 'hash' | 'name' | 'mime'>) => void
+  onPreview: (file: Pick<FileInfo, 'hash' | 'name' | 'mime'>) => void,
+  imageOptions?: {
+    readonly: () => boolean;
+    onImage: (view: EditorView, pos: number, hash: string) => void;
+  }
 ): AttachmentExtension {
   const refreshers = new Set<() => void>();
   const remarkAttachmentPlugin = createRemarkAttachmentPlugin();
@@ -355,7 +380,22 @@ export function createAttachmentExtension(
 
   const attachmentView = $view(
     attachmentNode,
-    () => (node) => createAttachmentNodeView(node, isAvailable, onPreview, refreshers)
+    () => (node, view, getPos) =>
+      createAttachmentNodeView(
+        node,
+        isAvailable,
+        onPreview,
+        refreshers,
+        imageOptions && {
+          readonly: imageOptions.readonly,
+          onImage: () => {
+            const pos = getPos();
+            if (pos === undefined) return;
+            const current = view.state.doc.nodeAt(pos);
+            if (current?.type === node.type) imageOptions.onImage(view, pos, current.attrs.hash);
+          },
+        }
+      )
   );
 
   return {
