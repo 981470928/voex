@@ -3,6 +3,7 @@ import { defineStore } from 'pinia';
 import { authUser } from '@/service/auth-session';
 import { beginAITurn, finishAITurn, getAIConversation } from '@/service/api/ai-api';
 import { errorMessage } from '@/utils/error';
+import { randomUUID } from '@/utils/id';
 import type { ChatMessage, TurnResponseInput } from '@/agent/types';
 
 interface HistoryState {
@@ -101,7 +102,7 @@ export const useAgentStore = defineStore('agent', () => {
 
   async function begin(fileKey: string, modelId: string, prompt: string, signal: AbortSignal) {
     const current = epoch;
-    const id = crypto.randomUUID();
+    const id = randomUUID();
     const controller = new AbortController();
     const stop = () => controller.abort();
     signal.addEventListener('abort', stop, { once: true });

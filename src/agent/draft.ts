@@ -1,4 +1,5 @@
 import type { DocumentChange, DocumentSnapshot, ReviewSnapshot } from './types';
+import { randomUUID } from '@/utils/id';
 
 /** Isolated working copies. Nothing here receives a live editor or a save function. */
 export class AgentDraft {
@@ -57,7 +58,7 @@ export class AgentDraft {
     if (this.changes.size >= 20) throw new Error('一次最多修改 20 个文件');
     if (new TextEncoder().encode(content).length > 1024 * 1024)
       throw new Error('单个文档不能超过 1 MiB');
-    const key = `draft-${crypto.randomUUID()}`;
+    const key = `draft-${randomUUID()}`;
     this.changes.set(key, {
       kind: 'create',
       file_key: key,
@@ -89,7 +90,7 @@ export class AgentDraft {
     if (!changes.length) return;
     // Copy rather than reference the working draft: every chat button owns its snapshot.
     return {
-      id: crypto.randomUUID(),
+      id: randomUUID(),
       createdAt: Date.now(),
       status: 'pending',
       fileCount: changes.length,

@@ -166,6 +166,7 @@ import VoexModal from '@/plugins/voex-modal/VoexModal.vue';
 import type { AIModel, AIProtocol } from '@/agent/types';
 import { saveAIModel } from '@/service/api/ai-api';
 import { errorMessage } from '@/utils/error';
+import { randomUUID } from '@/utils/id';
 import { useConfirm } from '@/composables/useConfirm';
 import { MessageType } from '@/constant/status';
 import { authUser } from '@/service/auth-session';
@@ -276,7 +277,7 @@ async function save() {
   error.value = '';
   try {
     const model = await saveAIModel({
-      id: draft.id || crypto.randomUUID(),
+      id: draft.id || randomUUID(),
       name: draft.name.trim(),
       protocol: draft.protocol,
       base_url: draft.base_url.trim(),
