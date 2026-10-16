@@ -1,4 +1,3 @@
-// 数据来源：board-client-app/src/constant/emoji.ts；名称与分类沿用其 zh-CN 翻译。
 // 修正原数据中的心中箭字符与蓝色圆 codes，保证字符和编码一致。
 export interface Emoji {
   codes: string;

@@ -1,10 +1,16 @@
 import { computed, onScopeDispose, reactive, ref, watch } from 'vue';
 import { defineStore } from 'pinia';
 import { authUser } from '@/service/auth-session';
-import { beginAITurn, finishAITurn, getAIConversation } from '@/service/api/ai-api';
+import {
+  beginAITurn,
+  createAIConversation,
+  finishAITurn,
+  getAIConversation,
+  listAIConversations,
+} from '@/service/api/ai-api';
 import { errorMessage } from '@/utils/error';
 import { randomUUID } from '@/utils/id';
-import type { ChatMessage, TurnResponseInput } from '@/agent/types';
+import type { AIConversationSession, ChatMessage, TurnResponseInput } from '@/agent/types';
 
 interface HistoryState {
   loaded: boolean;
@@ -12,30 +18,165 @@ interface HistoryState {
   error: string;
   nextCursor: string;
 }
+interface ConversationListState extends HistoryState {
+  creating: boolean;
+  createError: string;
+}
 
-// A cache of account-scoped server history, never the source of applied status or snapshots.
+// Account-scoped caches; every message, draft and pending write belongs to one conversation.
 export const useAgentStore = defineStore('agent', () => {
   const sessions = reactive<Record<string, ChatMessage[]>>({});
   const states = reactive<Record<string, HistoryState>>({});
+  const conversations = reactive<Record<string, AIConversationSession[]>>({});
+  const selectedSessions = reactive<Record<string, string>>({});
+  const lists = reactive<Record<string, ConversationListState>>({});
+  const drafts = reactive<Record<string, string>>({});
   const reads = new Map<string, AbortController>();
   const writes = new Set<AbortController>();
   const versions = new Map<string, number>();
-  const pending = new Map<string, { fileKey: string; input: TurnResponseInput }>();
+  const pendingCreates = new Map<string, string>();
+  const creates = new Map<string, Promise<AIConversationSession>>();
+  const pending = new Map<
+    string,
+    { fileKey: string; sessionId: string; input: TurnResponseInput }
+  >();
   const inFlight = new Map<string, Promise<ChatMessage[]>>();
   const pendingCount = ref(0);
   const hasUnpersisted = computed(() => pendingCount.value > 0);
   let epoch = 0;
 
-  function state(fileKey: string): HistoryState {
-    return (
-      states[fileKey] ??
-      (states[fileKey] = { loaded: false, loading: false, error: '', nextCursor: '' })
-    );
+  function cacheKey(fileKey: string, sessionId: string) {
+    return JSON.stringify([fileKey, sessionId]);
+  }
+  function messages(fileKey: string, sessionId: string): ChatMessage[] {
+    return sessions[cacheKey(fileKey, sessionId)] ?? [];
+  }
+  function draft(fileKey: string, sessionId: string) {
+    return drafts[cacheKey(fileKey, sessionId)] ?? '';
+  }
+  function setDraft(fileKey: string, sessionId: string, value: string) {
+    drafts[cacheKey(fileKey, sessionId)] = value;
+  }
+  function state(fileKey: string, sessionId: string): HistoryState {
+    const key = cacheKey(fileKey, sessionId);
+    if (!states[key]) states[key] = { loaded: false, loading: false, error: '', nextCursor: '' };
+    return states[key]!;
+  }
+  function listState(fileKey: string): ConversationListState {
+    if (!lists[fileKey])
+      lists[fileKey] = {
+        loaded: false,
+        loading: false,
+        error: '',
+        nextCursor: '',
+        creating: false,
+        createError: '',
+      };
+    return lists[fileKey]!;
+  }
+  function activateConversation(fileKey: string, id: string) {
+    if (!selectedSessions[fileKey] && id) {
+      const staging = cacheKey(fileKey, '');
+      const target = cacheKey(fileKey, id);
+      if (drafts[staging] && !drafts[target]) {
+        drafts[target] = drafts[staging];
+        delete drafts[staging];
+      }
+    }
+    selectedSessions[fileKey] = id;
+  }
+  function selectConversation(fileKey: string, id: string) {
+    if (conversations[fileKey]?.some((session) => session.id === id))
+      activateConversation(fileKey, id);
+  }
+  function mergeConversations(fileKey: string, incoming: AIConversationSession[], prepend = false) {
+    if (!conversations[fileKey]) conversations[fileKey] = [];
+    const items = conversations[fileKey]!;
+    for (const session of incoming) {
+      const existing = items.find((item) => item.id === session.id);
+      if (existing) {
+        if (session.updatedAt >= existing.updatedAt) Object.assign(existing, session);
+      } else if (prepend) items.unshift(session);
+      else items.push(session);
+    }
+    // Creation time is stable while replies update updatedAt; retain loaded older pages.
+    items.sort((a, b) => b.createdAt - a.createdAt);
+  }
+  async function loadConversations(fileKey: string, older = false) {
+    if (!fileKey || !authUser.value) return;
+    const current = epoch;
+    const key = `list:${fileKey}`;
+    const info = listState(fileKey);
+    if (older && (!info.nextCursor || info.loading)) return;
+    reads.get(key)?.abort();
+    const controller = new AbortController();
+    reads.set(key, controller);
+    info.loading = true;
+    info.error = '';
+    try {
+      const page = await listAIConversations(
+        fileKey,
+        older ? info.nextCursor : '',
+        controller.signal
+      );
+      if (epoch !== current || controller.signal.aborted) return;
+      mergeConversations(fileKey, page.sessions);
+      info.nextCursor = page.nextCursor;
+      info.loaded = true;
+      if (!selectedSessions[fileKey])
+        activateConversation(fileKey, conversations[fileKey]?.[0]?.id ?? '');
+    } catch (cause) {
+      if (epoch === current && !controller.signal.aborted)
+        info.error = errorMessage(cause, '对话列表加载失败，请重试');
+    } finally {
+      if (reads.get(key) === controller) {
+        reads.delete(key);
+        info.loading = false;
+      }
+    }
+  }
+  function createConversation(fileKey: string): Promise<AIConversationSession> {
+    const existing = creates.get(fileKey);
+    if (existing) return existing;
+    if (!fileKey || !authUser.value) return Promise.reject(new Error('请先登录并打开文档'));
+    const current = epoch;
+    const id = pendingCreates.get(fileKey) ?? randomUUID();
+    pendingCreates.set(fileKey, id);
+    const info = listState(fileKey);
+    const controller = new AbortController();
+    writes.add(controller);
+    info.creating = true;
+    info.createError = '';
+    const request = createAIConversation(fileKey, id, controller.signal)
+      .then(async (session) => {
+        if (epoch !== current) throw new Error('账号已切换');
+        pendingCreates.delete(fileKey);
+        mergeConversations(fileKey, [session], true);
+        activateConversation(fileKey, session.id);
+        // An idempotent replay can already contain turns from another tab.
+        await load(fileKey, session.id);
+        if (epoch !== current) throw new Error('账号已切换');
+        return session;
+      })
+      .catch((cause: unknown) => {
+        if (epoch === current) info.createError = errorMessage(cause, '新建对话失败，请重试');
+        throw cause;
+      })
+      .finally(() => {
+        writes.delete(controller);
+        if (creates.get(fileKey) === request) {
+          creates.delete(fileKey);
+          info.creating = false;
+        }
+      });
+    creates.set(fileKey, request);
+    return request;
   }
 
-  function merge(fileKey: string, messages: ChatMessage[], completedTurn?: string) {
-    const session = sessions[fileKey] ?? (sessions[fileKey] = []);
-    for (const message of messages) {
+  function merge(key: string, incoming: ChatMessage[], completedTurn?: string) {
+    if (!sessions[key]) sessions[key] = [];
+    const session = sessions[key]!;
+    for (const message of incoming) {
       const existing = session.find((item) => item.id === message.id);
       if (existing && existing.persistence && message.turnId !== completedTurn) continue;
       if (
@@ -56,51 +197,52 @@ export const useAgentStore = defineStore('agent', () => {
       (a, b) => a.sequence - b.sequence || (a.role === b.role ? 0 : a.role === 'user' ? -1 : 1)
     );
   }
-
-  function changed(fileKey: string) {
-    versions.set(fileKey, (versions.get(fileKey) ?? 0) + 1);
+  function changed(key: string) {
+    versions.set(key, (versions.get(key) ?? 0) + 1);
   }
-
-  async function load(fileKey: string, older = false) {
-    if (!fileKey || !authUser.value) return;
+  async function load(fileKey: string, sessionId: string, older = false) {
+    if (!fileKey || !sessionId || !authUser.value) return;
+    const key = cacheKey(fileKey, sessionId);
     const current = epoch;
-    const version = versions.get(fileKey) ?? 0;
-    const info = state(fileKey);
+    const version = versions.get(key) ?? 0;
+    const info = state(fileKey, sessionId);
     if (older && (!info.nextCursor || info.loading)) return;
-    reads.get(fileKey)?.abort();
+    reads.get(key)?.abort();
     const controller = new AbortController();
-    reads.set(fileKey, controller);
+    reads.set(key, controller);
     info.loading = true;
     info.error = '';
     try {
       const page = await getAIConversation(
         fileKey,
+        sessionId,
         older ? info.nextCursor : '',
         controller.signal
       );
-      if (
-        epoch !== current ||
-        controller.signal.aborted ||
-        (versions.get(fileKey) ?? 0) !== version
-      )
+      if (epoch !== current || controller.signal.aborted || (versions.get(key) ?? 0) !== version)
         return;
-      if (!older)
-        sessions[fileKey] = (sessions[fileKey] ?? []).filter((message) => !!message.persistence);
-      merge(fileKey, page.messages);
+      // Keep message objects until merging so a late read cannot downgrade applied status.
+      merge(key, page.messages);
       info.nextCursor = page.nextCursor;
       info.loaded = true;
     } catch (cause) {
       if (epoch === current && !controller.signal.aborted)
         info.error = errorMessage(cause, '对话历史加载失败，请重试');
     } finally {
-      if (reads.get(fileKey) === controller) {
-        reads.delete(fileKey);
+      if (reads.get(key) === controller) {
+        reads.delete(key);
         info.loading = false;
       }
     }
   }
-
-  async function begin(fileKey: string, modelId: string, prompt: string, signal: AbortSignal) {
+  async function begin(
+    fileKey: string,
+    sessionId: string,
+    modelId: string,
+    prompt: string,
+    signal: AbortSignal
+  ) {
+    const key = cacheKey(fileKey, sessionId);
     const current = epoch;
     const id = randomUUID();
     const controller = new AbortController();
@@ -109,11 +251,18 @@ export const useAgentStore = defineStore('agent', () => {
     if (signal.aborted) stop();
     writes.add(controller);
     try {
-      const messages = await beginAITurn(fileKey, id, modelId, prompt, controller.signal);
+      const result = await beginAITurn(fileKey, sessionId, id, modelId, prompt, controller.signal);
       if (current !== epoch) throw new Error('账号已切换');
-      changed(fileKey);
-      merge(fileKey, messages);
-      const message = sessions[fileKey]!.find((item) => item.id === id)!;
+      changed(key);
+      const firstTurn = !messages(fileKey, sessionId).some((message) => message.role === 'user');
+      merge(key, result);
+      const session = conversations[fileKey]?.find((item) => item.id === sessionId);
+      if (session) {
+        if (firstTurn && session.title === '新对话')
+          session.title = Array.from(prompt.trim().replace(/\s+/g, ' ')).slice(0, 40).join('');
+        session.updatedAt = result[0]?.createdAt ?? session.updatedAt;
+      }
+      const message = sessions[key]!.find((item) => item.id === id)!;
       message.persistence = 'saving';
       return message;
     } finally {
@@ -121,36 +270,39 @@ export const useAgentStore = defineStore('agent', () => {
       signal.removeEventListener('abort', stop);
     }
   }
-
-  function save(fileKey: string, id: string, input: TurnResponseInput) {
-    // Retrying always sends the exact same finalized payload, even after another tab applies it.
+  function save(fileKey: string, sessionId: string, id: string, input: TurnResponseInput) {
+    // Retries retain the original conversation and immutable finalized payload.
     if (!pending.has(id))
-      pending.set(id, { fileKey, input: JSON.parse(JSON.stringify(input)) as TurnResponseInput });
+      pending.set(id, {
+        fileKey,
+        sessionId,
+        input: JSON.parse(JSON.stringify(input)) as TurnResponseInput,
+      });
     pendingCount.value = pending.size;
     return retry(id);
   }
-
   function retry(id: string): Promise<ChatMessage[]> {
     const existing = inFlight.get(id);
     if (existing) return existing;
     const entry = pending.get(id);
     if (!entry) return Promise.reject(new Error('没有待重试的对话'));
+    const key = cacheKey(entry.fileKey, entry.sessionId);
     const current = epoch;
     const controller = new AbortController();
     writes.add(controller);
-    const message = sessions[entry.fileKey]?.find((item) => item.id === id);
+    const message = sessions[key]?.find((item) => item.id === id);
     if (message) {
       message.persistence = 'saving';
       message.persistenceError = '';
     }
     const request = finishAITurn(entry.fileKey, id, entry.input, controller.signal)
-      .then((messages) => {
+      .then((result) => {
         if (epoch !== current) throw new Error('账号已切换');
         pending.delete(id);
         pendingCount.value = pending.size;
-        changed(entry.fileKey);
-        merge(entry.fileKey, messages, id);
-        return messages;
+        changed(key);
+        merge(key, result, id);
+        return result;
       })
       .catch((cause: unknown) => {
         if (epoch === current && message) {
@@ -169,16 +321,14 @@ export const useAgentStore = defineStore('agent', () => {
     inFlight.set(id, request);
     return request;
   }
-
   function markApplied(id: string) {
-    for (const [fileKey, messages] of Object.entries(sessions))
-      for (const message of messages)
+    for (const [key, items] of Object.entries(sessions))
+      for (const message of items)
         if (message.review?.id === id) {
           message.review.status = 'applied';
-          changed(fileKey);
+          changed(key);
         }
   }
-
   function beforeUnload(event: BeforeUnloadEvent) {
     if (!hasUnpersisted.value && !writes.size) return;
     event.preventDefault();
@@ -195,13 +345,32 @@ export const useAgentStore = defineStore('agent', () => {
       reads.clear();
       versions.clear();
       writes.clear();
+      pendingCreates.clear();
+      creates.clear();
       pending.clear();
       inFlight.clear();
       pendingCount.value = 0;
-      for (const key of Object.keys(sessions)) delete sessions[key];
-      for (const key of Object.keys(states)) delete states[key];
+      for (const record of [sessions, states, conversations, selectedSessions, lists, drafts])
+        for (const key of Object.keys(record)) delete record[key];
     },
     { flush: 'sync' }
   );
-  return { sessions, state, load, begin, save, retry, markApplied, hasUnpersisted };
+  return {
+    conversations,
+    selectedSessions,
+    messages,
+    draft,
+    setDraft,
+    state,
+    listState,
+    loadConversations,
+    createConversation,
+    selectConversation,
+    load,
+    begin,
+    save,
+    retry,
+    markApplied,
+    hasUnpersisted,
+  };
 });

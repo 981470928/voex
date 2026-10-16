@@ -398,7 +398,6 @@
         </nav>
       </section>
     </div>
-    <JoinTeamDialog v-model="joinOpen" @applied="loadMine" />
   </main>
 </template>
 
@@ -406,11 +405,11 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router';
 import SvgIcon from '@/components/SvgIcon.vue';
-import JoinTeamDialog from '@/components/team/JoinTeamDialog.vue';
 import { useTeamStore } from '@/stores/team';
 import { useModalStore, ModalType } from '@/stores/modal';
 import { useNotificationStore } from '@/stores/notification';
 import { useConfirm } from '@/composables/useConfirm';
+import { useDialog } from '@/composables/useDialog';
 import { authUser } from '@/service/auth-session';
 import { errorMessage } from '@/utils/error';
 import { formatTime } from '@/utils/workspace';
@@ -455,6 +454,13 @@ const actionError = ref('');
 const myError = ref('');
 const myLoading = ref(false);
 const joinOpen = ref(false);
+useDialog(ModalType.JOIN_TEAM_DIALOG, {
+  visible: () => joinOpen.value,
+  props: () => ({ onApplied: loadMine }),
+  onClose: () => {
+    joinOpen.value = false;
+  },
+});
 const newInviteLink = ref('');
 const revealInvite = ref(false);
 const transferTo = ref('');

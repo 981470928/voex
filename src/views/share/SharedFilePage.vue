@@ -127,7 +127,6 @@
         <DownloadQueue />
       </section>
     </template>
-    <LocalDraftDialog v-model="showDraft" :content="localContent" />
   </main>
 </template>
 
@@ -137,9 +136,10 @@ import DownloadQueue from '@/components/DownloadQueue.vue';
 import { onBeforeRouteLeave, onBeforeRouteUpdate, RouterLink, useRoute } from 'vue-router';
 import { isAxiosError } from 'axios';
 import { MilkdownProvider } from '@milkdown/vue';
-import MilkdownEditor from '@/components/milkdown/MilkdownEditor.vue';
-import LocalDraftDialog from '@/components/share/LocalDraftDialog.vue';
+import MilkdownEditor from '@/views/edit/milkdown/MilkdownEditor.vue';
 import { useConfirm } from '@/composables/useConfirm';
+import { useDialog } from '@/composables/useDialog';
+import { ModalType } from '@/stores/modal';
 import { useNotificationStore } from '@/stores/notification';
 import { usePermissionStore } from '@/stores/permission';
 import { usePreviewerStore } from '@/stores/previewer';
@@ -191,6 +191,13 @@ const dirty = computed(() => ready.value && content.value !== savedContent.value
 const localContent = computed(() => {
   void showDraft.value;
   return editor.value?.getMarkdown() ?? content.value;
+});
+useDialog(ModalType.LOCAL_DRAFT_DIALOG, {
+  visible: () => showDraft.value,
+  props: () => ({ content: localContent.value }),
+  onClose: () => {
+    showDraft.value = false;
+  },
 });
 let controller: AbortController | undefined;
 let generation = 0;
@@ -373,8 +380,7 @@ async function previewAttachment(attachment: FileInfo) {
       ? await downloadRecentAttachment(recentKey.value, attachment.hash, options)
       : await downloadSharedAttachment(token, attachment.hash, options);
     if (disposed || current !== generation) return;
-    previewer.file = new File([blob], attachment.name, { type: attachment.mime });
-    previewer.visible = true;
+    previewer.showFile(new File([blob], attachment.name, { type: attachment.mime }));
   } catch (cause) {
     if (!disposed && current === generation)
       attachmentError.value =

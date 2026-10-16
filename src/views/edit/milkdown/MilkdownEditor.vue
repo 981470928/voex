@@ -1,7 +1,8 @@
 <template>
   <section class="milkdown-editor" :class="{ 'milkdown-editor--readonly': readonly }">
     <div
-      v-if="!readonly && showToolbar"
+      v-if="(!readonly || loading) && showToolbar"
+      ref="toolbarRef"
       class="milkdown-editor__toolbar"
       role="group"
       aria-label="编辑工具"
@@ -17,90 +18,158 @@
         :aria-label="action.label"
         :aria-pressed="action.active ? !!toolbarState[action.id]?.active : undefined"
         :aria-haspopup="action.opensDialog ? 'dialog' : undefined"
-        :disabled="!ready || toolbarState[action.id]?.enabled === false"
+        :disabled="loading || !ready || toolbarState[action.id]?.enabled === false"
         @mousedown.prevent
         @click="runAction(action)"
       >
-        {{ action.text }}
+        <SvgIcon v-if="action.id === 'link'" name="editor-link" :size="16" />
+        <template v-else>{{ action.text }}</template>
       </button>
+      <VoexTrigger
+        v-for="item in colorControls"
+        :key="item.kind"
+        :popup-visible="colorSelection?.kind === item.kind"
+        trigger="click"
+        position="bottom-start"
+        strategy="fixed"
+        :popup-offset="6"
+        :disabled="loading || !ready || toolbarState[item.kind]?.enabled === false"
+        role="dialog"
+        :aria-label="item.label"
+        @update:popup-visible="setColorMenuVisible(item.kind, $event)"
+        @show="focusColorMenu(item.kind)"
+      >
+        <button
+          type="button"
+          class="milkdown-editor__action milkdown-editor__color-button"
+          :class="{
+            'milkdown-editor__action--active':
+              toolbarState[item.kind]?.active || colorSelection?.kind === item.kind,
+          }"
+          :data-format="item.kind"
+          :title="item.label"
+          :aria-label="item.label"
+          aria-haspopup="dialog"
+          :disabled="loading || !ready || toolbarState[item.kind]?.enabled === false"
+          @mousedown.prevent
+          @keydown.down.prevent="setColorMenuVisible(item.kind, true)"
+        >
+          <span class="milkdown-editor__color-icon" aria-hidden="true">
+            <SvgIcon :name="item.icon" :size="16" />
+            <span
+              class="milkdown-editor__color-indicator"
+              :style="{ backgroundColor: toolbarColors[item.kind] ?? item.defaultColor }"
+            />
+          </span>
+          <SvgIcon name="chevron-right" :size="10" class="milkdown-editor__color-chevron" />
+        </button>
+        <template #content>
+          <div
+            :id="`${colorMenuId}-${item.kind}`"
+            class="milkdown-editor__color-menu"
+            @keydown.tab="handleColorMenuTab($event, item.kind)"
+          >
+            <ColorPicker v-model="colorDraft" :label="item.label" @change="applyMenuColor" />
+            <div class="milkdown-editor__color-footer">
+              <button
+                type="button"
+                class="milkdown-editor__color-clear"
+                :disabled="!colorSelection?.clearable"
+                @click="applyMenuColor(null)"
+              >
+                <SvgIcon name="eraser" :size="16" />
+                清除{{ item.label }}
+              </button>
+              <button
+                type="button"
+                class="milkdown-editor__color-apply"
+                @click="applyMenuColor(colorDraft)"
+              >
+                应用
+              </button>
+            </div>
+          </div>
+        </template>
+      </VoexTrigger>
       <span v-if="allowAttachments" class="milkdown-editor__separator" aria-hidden="true" />
       <button
         type="button"
         class="milkdown-editor__action"
-        :disabled="!ready"
+        :disabled="loading || !ready"
         title="插入表情"
+        aria-label="插入表情"
         aria-haspopup="dialog"
         @mousedown.prevent
         @click="openEmoji"
       >
-        表情
+        <SvgIcon name="face" :size="16" />
       </button>
       <button
         type="button"
         class="milkdown-editor__action"
-        :disabled="!ready"
+        :disabled="loading || !ready"
         aria-haspopup="dialog"
+        title="图库"
+        aria-label="图库"
         @mousedown.prevent
         @click="openPexels"
       >
-        图库
+        <SvgIcon name="image" :size="16" />
       </button>
       <button
         type="button"
         class="milkdown-editor__action"
-        :disabled="!ready"
+        :disabled="loading || !ready"
         title="插入或编辑 LaTeX 公式"
+        aria-label="插入或编辑 LaTeX 公式"
         aria-haspopup="dialog"
         @mousedown.prevent
         @click="openLatex()"
       >
-        公式
+        <SvgIcon name="editor-formula" :size="16" />
       </button>
       <button
         type="button"
         class="milkdown-editor__action"
-        :disabled="!ready"
+        :disabled="loading || !ready"
         title="插入或编辑流程图"
+        aria-label="插入或编辑流程图"
         aria-haspopup="dialog"
         @mousedown.prevent
         @click="openMermaid()"
       >
-        流程图
+        <SvgIcon name="diagram" :size="16" />
       </button>
       <button
         v-if="allowAttachments"
         type="button"
-        class="milkdown-editor__action milkdown-editor__attachment-button"
-        :disabled="!ready || uploading"
+        class="milkdown-editor__action"
+        :title="uploading ? '上传中…' : '添加附件'"
+        :aria-label="uploading ? '上传中…' : '添加附件'"
+        :disabled="loading || !ready || uploading"
         :aria-busy="uploading"
         @mousedown.prevent
         @click="uploadAndInsertAttachments"
       >
-        {{ uploading ? '上传中…' : '添加附件' }}
+        <SvgIcon
+          :name="uploading ? 'loading' : 'attachment'"
+          :size="16"
+          :class="{ 'milkdown-editor__uploading': uploading }"
+        />
       </button>
     </div>
-    <Milkdown />
-    <EmojiDialog v-if="emojiSelection" @select="insertEmoji" @close="closeEmoji" />
-    <PexelsDialog v-if="pexelsSelection" :on-insert="insertPexelsPhoto" @close="closePexels" />
-    <LatexDialog
-      v-if="latexSelection"
-      :initial="latexSelection.initial"
-      :editing="latexSelection.editing"
-      :on-insert="insertLatex"
-      @close="closeLatex"
-    />
-    <MermaidDialog
-      v-if="mermaidSelection"
-      :initial="mermaidSelection.initial"
-      :editing="mermaidSelection.editing"
-      :on-insert="insertMermaid"
-      @close="closeMermaid"
-    />
+    <Milkdown :inert="loading" :aria-hidden="loading" />
   </section>
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
+import { nextTick, onBeforeUnmount, ref, shallowRef, useId, watch } from 'vue';
+import SvgIcon from '@/components/SvgIcon.vue';
+import ColorPicker from '@/components/ColorPicker.vue';
+import { useRecentColors } from '@/composables/useRecentColors';
+import { useDialog } from '@/composables/useDialog';
+import { VoexTrigger } from '@/plugins/trigger';
+import type { Mark } from '@milkdown/kit/prose/model';
 import {
   Editor,
   EditorStatus,
@@ -135,34 +204,30 @@ import { errorMessage } from '@/utils/error';
 import {
   createAttachmentExtension,
   type AttachmentExtension,
-} from '@/components/milkdown/attachment';
-import { createEditorContent } from '@/components/milkdown/editor-content';
-import { createEditorPaste } from '@/components/milkdown/editor-paste';
+} from '@/views/edit/milkdown/attachment';
+import { createEditorContent } from '@/views/edit/milkdown/editor-content';
+import { createEditorPaste } from '@/views/edit/milkdown/editor-paste';
 import {
   createImageImport,
   createImportedImage,
   imageAttachmentHash,
-} from '@/components/milkdown/image-import';
+} from '@/views/edit/milkdown/image-import';
 import { TextSelection } from '@milkdown/kit/prose/state';
-import { createEmojiExtension } from '@/components/milkdown/emoji';
-import EmojiDialog from '@/components/milkdown/EmojiDialog.vue';
+import { createEmojiExtension } from '@/views/edit/milkdown/emoji';
 import type { Emoji } from '@/constant/emoji';
-import PexelsDialog from '@/components/milkdown/PexelsDialog.vue';
 import type { PexelsPhoto } from '@/service/api/pexels-api';
-import LatexDialog from '@/components/milkdown/LatexDialog.vue';
-import { createLatexExtension, type LatexAttrs } from '@/components/milkdown/latex';
-import MermaidDialog from '@/components/milkdown/MermaidDialog.vue';
-import { createMermaidExtension } from '@/components/milkdown/mermaid';
+import { createLatexExtension, type LatexAttrs } from '@/views/edit/milkdown/latex';
+import { createMermaidExtension } from '@/views/edit/milkdown/mermaid';
 import {
   createTextColorExtension,
   normalizeHexColor,
   type TextColorKind,
-} from '@/components/milkdown/text-color';
+} from '@/views/edit/milkdown/text-color';
 import {
   createEditorInteractions,
   createFormattingActions,
   type EditorAction,
-} from '@/components/milkdown/editor-interactions';
+} from '@/views/edit/milkdown/editor-interactions';
 
 const props = withDefaults(
   defineProps<{
@@ -175,6 +240,7 @@ const props = withDefaults(
     allowAttachments?: boolean;
     onPreviewAttachment?: (file: FileInfo) => void;
     readonly?: boolean;
+    loading?: boolean;
     showToolbar?: boolean;
   }>(),
   {
@@ -187,12 +253,14 @@ const props = withDefaults(
     allowAttachments: true,
     onPreviewAttachment: undefined,
     readonly: false,
+    loading: false,
     showToolbar: true,
   }
 );
 
 const emit = defineEmits<{
   ready: [markdown: string];
+  'load-error': [message: string];
   change: [markdown: string];
 }>();
 
@@ -201,6 +269,26 @@ const attachmentExtensionRef = shallowRef<AttachmentExtension | null>(null);
 const ready = ref(false);
 const uploading = ref(false);
 const toolbarState = shallowRef<Record<string, { active: boolean; enabled: boolean }>>({});
+const toolbarRef = ref<HTMLElement>();
+const colorMenuId = `editor-color-${useId()}`;
+const colorControls = [
+  { kind: 'textColor', label: '文字颜色', icon: 'editor-text-color', defaultColor: '#FF0000' },
+  { kind: 'highlight', label: '背景色', icon: 'editor-highlight', defaultColor: '#FFFF00' },
+] as const;
+const toolbarColors = shallowRef<Record<TextColorKind, string | null>>({
+  textColor: null,
+  highlight: null,
+});
+const colorDraft = ref('#FF0000');
+const { addRecentColor } = useRecentColors();
+const colorSelection = shallowRef<{
+  kind: TextColorKind;
+  key: symbol;
+  editor: Editor;
+  version: number;
+  marks: readonly Mark[] | null;
+  clearable: boolean;
+} | null>(null);
 const modal = useModalStore();
 const notification = useNotificationStore();
 const pendingAttachments: FileInfo[] = [];
@@ -221,6 +309,38 @@ const mermaidSelection = shallowRef<{
   initial?: string;
   editing: boolean;
 } | null>(null);
+useDialog(ModalType.EMOJI_DIALOG, {
+  visible: () => !!emojiSelection.value,
+  props: () => ({ onSelect: insertEmoji }),
+  onClose: closeEmoji,
+  key: () => emojiSelection.value?.key,
+});
+useDialog(ModalType.PEXELS_DIALOG, {
+  visible: () => !!pexelsSelection.value,
+  props: () => ({ onInsert: insertPexelsPhoto }),
+  onClose: closePexels,
+  key: () => pexelsSelection.value?.key,
+});
+useDialog(ModalType.LATEX_DIALOG, {
+  visible: () => !!latexSelection.value,
+  props: () => ({
+    initial: latexSelection.value?.initial,
+    editing: latexSelection.value?.editing,
+    onInsert: insertLatex,
+  }),
+  onClose: closeLatex,
+  key: () => latexSelection.value?.key,
+});
+useDialog(ModalType.MERMAID_DIALOG, {
+  visible: () => !!mermaidSelection.value,
+  props: () => ({
+    initial: mermaidSelection.value?.initial,
+    editing: mermaidSelection.value?.editing,
+    onInsert: insertMermaid,
+  }),
+  onClose: closeMermaid,
+  key: () => mermaidSelection.value?.key,
+});
 let disposed = false;
 let readonlyVersion = 0;
 let publishedMarkdown = props.defaultValue;
@@ -314,7 +434,6 @@ const toolbarActions: EditorAction[] = [
     enabled: (ctx: Ctx) => command(ctx.get(editorViewCtx).state),
   })),
   ...createFormattingActions(editLink),
-  ...colorActions,
 ];
 
 function canEdit(editor = editorRef.value): editor is Editor {
@@ -328,8 +447,12 @@ function publishMarkdown(markdown: string) {
 }
 
 function refreshToolbar(ctx: Ctx) {
+  toolbarColors.value = {
+    textColor: textColors.selected(ctx, 'textColor'),
+    highlight: textColors.selected(ctx, 'highlight'),
+  };
   toolbarState.value = Object.fromEntries(
-    toolbarActions.map((action) => [
+    [...toolbarActions, ...colorActions].map((action) => [
       action.id,
       { active: action.active?.(ctx) ?? false, enabled: action.enabled?.(ctx) ?? true },
     ])
@@ -640,6 +763,98 @@ function editLink() {
   });
 }
 
+function closeColorMenu() {
+  if (colorSelection.value) bookmarks.delete(colorSelection.value.key);
+  colorSelection.value = null;
+}
+
+function setColorMenuVisible(kind: TextColorKind, visible: boolean) {
+  if (!visible) {
+    if (colorSelection.value?.kind === kind) closeColorMenu();
+    return;
+  }
+  const editor = editorRef.value;
+  if (!canEdit(editor) || !editor.action((ctx) => textColors.enabled(ctx, kind))) return;
+  if (colorSelection.value?.kind === kind) return;
+  closeColorMenu();
+  const initial = editor.action((ctx) => ({
+    color: textColors.selected(ctx, kind),
+    marks: ctx.get(editorViewCtx).state.storedMarks,
+    clearable: textColors.active(ctx, kind),
+  }));
+  colorDraft.value =
+    initial.color ?? colorControls.find((item) => item.kind === kind)!.defaultColor;
+  interactions.hide();
+  colorSelection.value = {
+    kind,
+    key: rememberSelection(editor),
+    editor,
+    version: readonlyVersion,
+    marks: initial.marks,
+    clearable: initial.clearable,
+  };
+}
+
+function colorMenuElement(kind: TextColorKind) {
+  return toolbarRef.value?.ownerDocument.getElementById(`${colorMenuId}-${kind}`);
+}
+
+function focusColorMenu(kind: TextColorKind) {
+  if (colorSelection.value?.kind === kind)
+    colorMenuElement(kind)
+      ?.querySelector<HTMLInputElement>('input')
+      ?.focus({ preventScroll: true });
+}
+
+function handleColorMenuTab(event: KeyboardEvent, kind: TextColorKind) {
+  const controls = colorMenuElement(kind)?.querySelectorAll<HTMLElement>(
+    'input:not(:disabled), button:not(:disabled)'
+  );
+  if (!controls?.length) return;
+  const boundary = event.shiftKey ? controls[0] : controls[controls.length - 1];
+  if (event.target !== boundary) return;
+  event.preventDefault();
+  const buttons = [
+    ...(toolbarRef.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []),
+  ];
+  const index = buttons.findIndex((button) => button.dataset.format === kind);
+  const target = event.shiftKey ? buttons[index] : buttons[index + 1];
+  closeColorMenu();
+  void nextTick(() => target?.focus({ preventScroll: true }));
+}
+
+function applyMenuColor(color: string | null) {
+  const session = colorSelection.value;
+  if (!session) return;
+  if (
+    !canEdit(session.editor) ||
+    session.editor !== editorRef.value ||
+    session.version !== readonlyVersion
+  ) {
+    closeColorMenu();
+    return;
+  }
+  try {
+    session.editor.action((ctx) => {
+      restoreSelection(ctx, session.key);
+      const view = ctx.get(editorViewCtx);
+      if (view.state.selection.empty && session.marks)
+        view.dispatch(view.state.tr.setStoredMarks(session.marks));
+      textColors.apply(ctx, session.kind, color);
+      refreshToolbar(ctx);
+    });
+    publishMarkdown(session.editor.action(serializeMarkdown()));
+    if (color) addRecentColor(color);
+    closeColorMenu();
+    void nextTick(() => {
+      if (canEdit(session.editor) && session.editor === editorRef.value)
+        session.editor.action((ctx) => ctx.get(editorViewCtx).focus());
+    });
+  } catch (cause) {
+    notification.show(errorMessage(cause, '颜色设置失败，请重新选择文字后重试'), 'error');
+  }
+}
+
 function editTextColor(kind: TextColorKind) {
   const editor = editorRef.value;
   if (!canEdit(editor) || !editor.action((ctx) => textColors.enabled(ctx, kind))) return;
@@ -674,7 +889,7 @@ function editTextColor(kind: TextColorKind) {
   });
 }
 
-useEditor((root) => {
+const { loading: initializing } = useEditor((root) => {
   const extension = createAttachmentExtension(
     (hash) => props.attachments.some((file) => file.hash === hash),
     (file) => {
@@ -763,15 +978,24 @@ useEditor((root) => {
   editorRef.value = editor;
   editor.onStatusChange((status) => {
     if (status === EditorStatus.Created && !disposed) {
-      ready.value = true;
       editor.action(refreshToolbar);
       publishedMarkdown = editor.action(serializeMarkdown());
+      ready.value = true;
       emit('ready', publishedMarkdown);
       pendingAttachments.splice(0).forEach((file) => insertAttachment(file));
     }
   });
   return editor;
 });
+
+watch(
+  initializing,
+  (isInitializing, wasInitializing) => {
+    if (wasInitializing && !isInitializing && !ready.value && !disposed)
+      emit('load-error', '编辑器初始化失败，请重新加载文档。');
+  },
+  { flush: 'post' }
+);
 
 watch(
   () => props.readonly,
@@ -788,6 +1012,7 @@ watch(
     closePexels();
     closeLatex();
     closeMermaid();
+    closeColorMenu();
     if (props.readonly) pendingAttachments.length = 0;
     if (editorRef.value?.status === EditorStatus.Created) {
       editorRef.value.action((ctx) => {
@@ -801,6 +1026,13 @@ watch(
 );
 
 watch(
+  () => props.showToolbar,
+  (visible) => {
+    if (!visible) closeColorMenu();
+  }
+);
+
+watch(
   () => props.attachments.map((file) => file.hash),
   () => attachmentExtensionRef.value?.refreshAvailability()
 );
@@ -808,6 +1040,18 @@ watch(
 onBeforeUnmount(() => {
   disposed = true;
   ready.value = false;
+  closeColorMenu();
+  if (editorRef.value?.status === EditorStatus.Created) {
+    editorRef.value.action((ctx) => {
+      const { dom } = ctx.get(editorViewCtx);
+      const selection = dom.ownerDocument.getSelection();
+      // 在 DOM 移除前释放焦点和选区，避免 Chromium 把输入光标留在页面根节点。
+      if (dom.contains(dom.ownerDocument.activeElement)) dom.blur();
+      if (selection && (dom.contains(selection.anchorNode) || dom.contains(selection.focusNode))) {
+        selection.removeAllRanges();
+      }
+    });
+  }
   pendingAttachments.length = 0;
   bookmarks.clear();
   content.destroy();
@@ -1103,8 +1347,27 @@ defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
     &[data-format='undo'], &[data-format='redo']
       font-size 20px
 
-  &__attachment-button
-    min-width 80px
+  &__color-button
+    gap 5px
+
+  &__color-icon
+    position relative
+    display inline-flex
+    padding-bottom 4px
+
+  &__color-indicator
+    position absolute
+    right 0
+    bottom 0
+    left 0
+    height 3px
+    border-radius 2px
+
+  &__color-chevron
+    transform rotate(90deg)
+
+  &__uploading
+    animation milkdown-toolbar-spin 1s linear infinite
 
   &__separator
     width 1px
@@ -1776,4 +2039,70 @@ defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
     @media (pointer coarse)
       min-height 44px
       min-width 44px
+.milkdown-editor__color-menu
+  box-sizing border-box
+  width 280px
+  max-width calc(100vw - 16px)
+  border 1px solid var(--color-border-secondary)
+  border-radius var(--border-radius-item-m)
+  background var(--color-bg-secondary)
+  color var(--color-text-primary)
+
+  .color-picker
+    box-sizing border-box
+    width 100%
+    border none
+
+.milkdown-editor__color-footer
+  display flex
+  align-items center
+  gap 6px
+  padding 6px
+  border-top 1px solid var(--color-border-secondary)
+
+.milkdown-editor__color-clear,
+.milkdown-editor__color-apply
+  display flex
+  align-items center
+  gap 8px
+  min-height 32px
+  padding 6px
+  border-radius var(--border-radius-item-s)
+  color var(--color-text-secondary)
+  background transparent
+  font-family inherit
+  font-size 13px
+  cursor pointer
+
+  &:hover:not(:disabled)
+    background var(--color-bg-translucent)
+    color var(--color-text-primary)
+
+  &:focus-visible
+    outline 2px solid var(--color-accent)
+    outline-offset -2px
+
+  &:active:not(:disabled)
+    background var(--color-accent-tint)
+
+  &:disabled
+    opacity .4
+    cursor not-allowed
+
+.milkdown-editor__color-clear
+  flex 1
+
+.milkdown-editor__color-apply
+  justify-content center
+  min-width 48px
+  background var(--color-accent-tint)
+  color var(--color-accent)
+
+@keyframes milkdown-toolbar-spin
+  to
+    transform rotate(360deg)
+
+@media (prefers-reduced-motion: reduce)
+  .milkdown-editor__uploading
+    animation none
 </style>

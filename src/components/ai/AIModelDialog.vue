@@ -212,7 +212,8 @@ watch(
   (open) => {
     if (open) load(props.selectedId);
     else draft.api_key = '';
-  }
+  },
+  { immediate: true }
 );
 
 async function discardAllowed() {

@@ -2,6 +2,8 @@ import http from './https';
 import type { ApiError } from './index';
 import type {
   AIModel,
+  AIConversationSession,
+  ConversationSessionPage,
   ChatMessage,
   ConversationPage,
   ReviewSnapshot,
@@ -42,15 +44,36 @@ export function applyAIReview(review: ReviewSnapshot) {
   );
 }
 
-export function getAIConversation(fileKey: string, before = '', signal?: AbortSignal) {
+export function listAIConversations(fileKey: string, before = '', signal?: AbortSignal) {
+  return http.get<ApiError, ConversationSessionPage>(
+    `/ai/conversations/${encodeURIComponent(fileKey)}/sessions`,
+    { signal, params: before ? { before } : undefined }
+  );
+}
+
+export function createAIConversation(fileKey: string, id: string, signal?: AbortSignal) {
+  return http.put<ApiError, AIConversationSession>(
+    `/ai/conversations/${encodeURIComponent(fileKey)}/sessions/${encodeURIComponent(id)}`,
+    {},
+    { signal }
+  );
+}
+
+export function getAIConversation(
+  fileKey: string,
+  sessionId: string,
+  before = '',
+  signal?: AbortSignal
+) {
   return http.get<ApiError, ConversationPage>(`/ai/conversations/${encodeURIComponent(fileKey)}`, {
     signal,
-    params: before ? { before } : undefined,
+    params: { session_id: sessionId, ...(before ? { before } : {}) },
   });
 }
 
 export function beginAITurn(
   fileKey: string,
+  sessionId: string,
   id: string,
   modelId: string,
   prompt: string,
@@ -58,7 +81,7 @@ export function beginAITurn(
 ) {
   return http.put<ApiError, ChatMessage[]>(
     `/ai/conversations/${encodeURIComponent(fileKey)}/turns/${encodeURIComponent(id)}`,
-    { model_id: modelId, prompt },
+    { session_id: sessionId, model_id: modelId, prompt },
     { signal }
   );
 }

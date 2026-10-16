@@ -2,6 +2,7 @@
   "name": "voex",
   "version": "0.0.0",
   "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -18,6 +19,7 @@
   "dependencies": {
     "@file-viewer/preset-standard": "^3.0.0",
     "@file-viewer/vue3": "^3.0.0",
+    "@floating-ui/dom": "1.8.0",
     "@milkdown/kit": "^7.22.1",
     "@milkdown/plugin-prism": "7.22.1",
     "@milkdown/theme-nord": "^7.22.1",

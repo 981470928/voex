@@ -60,6 +60,18 @@ export interface ChatMessage {
   createdAt?: number;
 }
 
+export interface AIConversationSession {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ConversationSessionPage {
+  sessions: AIConversationSession[];
+  nextCursor: string;
+}
+
 export interface ConversationPage {
   messages: ChatMessage[];
   nextCursor: string;

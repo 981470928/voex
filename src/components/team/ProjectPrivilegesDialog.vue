@@ -57,7 +57,7 @@
 </template>
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
+import { useRouter, type RouteLocationNormalized } from 'vue-router';
 import { VoexModal } from '@/plugins/voex-modal';
 import { getTeamMembers, teamRoleLabels, type TeamMember } from '@/service/api/team-api';
 import {
@@ -72,6 +72,7 @@ import { errorMessage } from '@/utils/error';
 const props = defineProps<{ modelValue: boolean; project: ProjectInfo }>();
 const emit = defineEmits<{ 'update:modelValue': [boolean]; saved: [] }>();
 const { confirm } = useConfirm();
+const router = useRouter();
 const notification = useNotificationStore();
 const members = ref<TeamMember[]>([]);
 const mode = ref<ProjectPrivileges['mode']>('inherit');
@@ -171,8 +172,17 @@ watch(
   },
   { immediate: true }
 );
-onBeforeRouteLeave(canLeave);
-onBeforeRouteUpdate(canLeave);
+let approvedNavigation: RouteLocationNormalized | undefined;
+const removeBeforeEach = router.beforeEach(async (to) => {
+  if (!props.modelValue) return;
+  if (!(await canLeave())) return false;
+  approvedNavigation = to;
+});
+const removeAfterEach = router.afterEach((to, _from, failure) => {
+  if (approvedNavigation !== to) return;
+  approvedNavigation = undefined;
+  if (!failure && props.modelValue) emit('update:modelValue', false);
+});
 function beforeUnload(event: BeforeUnloadEvent) {
   if (props.modelValue && (dirty.value || saving.value)) {
     event.preventDefault();
@@ -181,6 +191,8 @@ function beforeUnload(event: BeforeUnloadEvent) {
 }
 window.addEventListener('beforeunload', beforeUnload);
 onBeforeUnmount(() => {
+  removeBeforeEach();
+  removeAfterEach();
   active = false;
   controller?.abort();
   window.removeEventListener('beforeunload', beforeUnload);

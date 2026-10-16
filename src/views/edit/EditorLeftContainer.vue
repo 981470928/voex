@@ -1,19 +1,15 @@
 <template>
   <aside class="editor-left" :class="{ 'editor-left--mobile': mobile }" aria-label="当前项目目录">
     <div v-if="!mobile" class="editor-left__header">
-      <RouterLink
-        :to="desktopLocation(undefined, undefined, displayedTree?.project.team_key)"
-        class="editor-left__logo"
-        title="返回主页"
-        ><img :src="getImages('voex-logo-color-320.png')" alt="Voex 主页"
-      /></RouterLink>
+      <h2 class="editor-left__title">项目列表</h2>
       <button
-        class="voex-icon-btn_32"
-        title="收起侧栏"
-        aria-label="收起侧栏"
+        type="button"
+        class="edit-page__icon-button"
+        title="关闭项目列表"
+        aria-label="关闭项目列表"
         @click="$emit('toggle')"
       >
-        <SvgIcon name="sidebar-collapse" :size="22" />
+        <SvgIcon name="close" :size="18" />
       </button>
     </div>
     <RouterLink
@@ -77,7 +73,6 @@
 import { computed, ref, watch } from 'vue';
 import SvgIcon from '@/components/SvgIcon.vue';
 import ProjectTree from '@/components/ProjectTree.vue';
-import { useImages } from '@/composables/useImages';
 import { buildDirectoryTree, desktopLocation, folderAncestors } from '@/utils/workspace';
 import type { DocumentSummary } from '@/service/api/document-api';
 import type { ProjectTree as ProjectTreeData } from '@/service/api/workspace-api';
@@ -99,7 +94,6 @@ defineEmits<{
   rename: [doc: DocumentSummary];
 }>();
 const permission = usePermissionStore();
-const { getImages } = useImages('/');
 const expanded = ref(new Set<string>());
 // 切换文件时父级会暂时清空数据，保留已渲染的目录，直到新数据返回或加载结束。
 const displayedTree = computed<ProjectTreeData | null>(
@@ -142,10 +136,14 @@ watch(
   display flex
   flex-direction column
   height 100%
-  width 264px
+  width 100%
+  min-height 0
+  min-width 0
   flex-shrink 0
-  background var(--color-bg-panel)
-  border-right 1px solid var(--color-border-primary)
+  background transparent
+  :deep(.project-tree--nested)
+    border-left 0
+
   &--mobile
     flex 1
     width 100%
@@ -169,12 +167,11 @@ watch(
     justify-content space-between
     min-height 56px
     padding 0 14px
-    border-bottom 1px solid var(--color-border-primary)
-  &__logo
-    display inline-flex
-    img
-      height 28px
-      width auto
+  &__title
+    margin 0
+    font-size 14px
+    font-weight 600
+    color var(--color-text-primary)
   &__project
     display flex
     align-items center
@@ -213,7 +210,6 @@ watch(
     gap 8px
     padding 8px 12px
     min-height 48px
-    border-top 1px solid var(--color-border-primary)
     button, a
       display inline-flex
       align-items center

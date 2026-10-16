@@ -84,7 +84,7 @@ type ModalSession = {
   previousFocus: HTMLElement | null;
 };
 
-// Shared by all instances, including dialogs outside modalStore (e.g. FileViewerDialog).
+// Shared by registered dialogs, drawers, and other VoexModal instances.
 const modalStack: ModalSession[] = [];
 let restorePageScroll: (() => void) | undefined;
 

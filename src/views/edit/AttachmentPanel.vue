@@ -14,17 +14,14 @@
       <span v-if="attachments.length" class="attachment-panel__badge">
         {{ attachments.length }}
       </span>
-    </div>
-    <div v-else class="attachment-panel__tools">
-      <span>{{ attachments.length }} 个附件</span>
       <button
         type="button"
-        class="attachment-panel__upload"
-        :disabled="!canUpload || !activeDocKey"
-        @click="emit('upload')"
+        class="edit-page__icon-button"
+        title="关闭附件"
+        aria-label="关闭附件"
+        @click="emit('close')"
       >
-        <SvgIcon name="cloud-upload" size="18px" />
-        添加附件
+        <SvgIcon name="close" :size="18" />
       </button>
     </div>
     <div class="attachment-panel__list">
@@ -34,19 +31,14 @@
         class="attachment-panel__empty attachment-panel__empty--drop-hint"
       >
         <SvgIcon name="cloud-upload" size="40px" class="attachment-panel__empty-icon" />
-        <p v-if="mobile">{{ canUpload ? '点击「添加附件」上传文件' : '暂无附件' }}</p>
-        <p v-else>拖放文件到此处上传</p>
+        <p>{{ canUpload ? '点击下方「添加附件」或拖放文件到此处' : '暂无附件' }}</p>
       </div>
-      <div
-        v-for="file in attachments"
-        :key="file.hash"
-        class="attachment-panel__item"
-        @click="emit('insert', file)"
-      >
+      <div v-for="file in attachments" :key="file.hash" class="attachment-panel__item">
         <button
           class="attachment-panel__insert"
           type="button"
           :title="`插入附件 ${file.name}`"
+          :disabled="!canUpload"
           @click.stop="emit('insert', file)"
         >
           <span class="attachment-panel__icon">
@@ -77,6 +69,7 @@
           class="attachment-panel__delete"
           type="button"
           :title="`删除 ${file.name}`"
+          :disabled="!canUpload"
           @click.stop="emit('delete', file)"
         >
           <SvgIcon name="trash" size="16px" />
@@ -102,13 +95,22 @@
         </div>
       </div>
     </div>
-    <DownloadQueue />
+    <footer class="attachment-panel__footer">
+      <button
+        type="button"
+        class="attachment-panel__upload"
+        :disabled="!canUpload || !activeDocKey"
+        @click="emit('upload')"
+      >
+        <SvgIcon name="cloud-upload" :size="18" />
+        添加附件
+      </button>
+    </footer>
   </aside>
 </template>
 
 <script setup lang="ts">
 import SvgIcon from '@/components/SvgIcon.vue';
-import DownloadQueue from '@/components/DownloadQueue.vue';
 import { computed } from 'vue';
 import type { FileInfo } from '@/service/api/document-api';
 import type { UploadItem } from '@/stores/upload';
@@ -123,6 +125,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
+  close: [];
   upload: [];
   download: [file: FileInfo];
   insert: [file: FileInfo];
@@ -142,10 +145,11 @@ const pendingUploads = computed(() => {
 .attachment-panel
   display flex
   flex-direction column
-  width 280px
+  width 100%
+  height 100%
+  min-width 0
   min-height 0
-  background var(--color-bg-panel)
-  border-left 1px solid var(--color-border-primary)
+  background transparent
   transition background .2s
 
   &--drag-over
@@ -166,25 +170,20 @@ const pendingUploads = computed(() => {
     .attachment-panel__insert
       min-height 40px
 
-  &__tools
-    display flex
-    align-items center
-    justify-content space-between
-    gap 12px
-    padding 8px 16px
-    border-bottom 1px solid var(--color-border-primary)
+  &__footer
     flex-shrink 0
-    font-size 12px
-    color var(--color-text-tertiary)
+    padding 12px
+    padding-bottom unquote('max(12px, env(safe-area-inset-bottom))')
 
   &__upload
     display inline-flex
     align-items center
     justify-content center
     gap 6px
+    width 100%
     min-height 40px
     padding 8px 12px
-    border 1px solid var(--color-border-secondary)
+    border 0
     border-radius 8px
     background var(--color-bg-secondary)
     color var(--color-text-primary)
@@ -205,17 +204,17 @@ const pendingUploads = computed(() => {
   &__header
     display flex
     align-items center
-    justify-content space-between
-    height 56px
-    padding 16px 20px
-    border-bottom 1px solid var(--color-border-primary)
+    gap 8px
+    min-height 56px
+    padding 8px 14px
     flex-shrink 0
 
   &__title
     display flex
     align-items center
     gap 8px
-    font-size 15px
+    flex 1
+    font-size 14px
     font-weight 600
     color var(--color-text-primary)
     margin 0
@@ -264,7 +263,6 @@ const pendingUploads = computed(() => {
     gap 4px
     padding 4px
     border-radius 8px
-    cursor pointer
     transition background .15s
 
     &:hover
@@ -360,11 +358,11 @@ const pendingUploads = computed(() => {
     color var(--color-fg-secondary)
 
     &:hover
-      background #fef2f2
-      color #ef4444
+      background var(--color-accent-tint)
+      color var(--color-red)
 
     &:focus-visible
-      outline 2px solid #ef4444
+      outline 2px solid var(--color-red)
       outline-offset 1px
 
   &__progress

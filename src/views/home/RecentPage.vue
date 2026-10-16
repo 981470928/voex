@@ -27,13 +27,6 @@
         </p></template
       >
     </FileList>
-    <FileDetailsDialog
-      v-model="detailsOpen"
-      :file-key="detailsFile.key"
-      :file-name="detailsFile.name"
-      source="recent"
-      @resolved="applyDetails"
-    />
   </section>
 </template>
 
@@ -41,7 +34,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import FileList from '@/components/files/FileList.vue';
-import FileDetailsDialog from '@/components/files/FileDetailsDialog.vue';
 import type { FileListEntry } from '@/components/files/types';
 import {
   queryRecentFiles,
@@ -52,6 +44,8 @@ import {
 import type { FileDetails } from '@/service/api/document-api';
 import type { ContextMenuItem } from '@/plugins/context-menu';
 import { useConfirm } from '@/composables/useConfirm';
+import { useDialog } from '@/composables/useDialog';
+import { ModalType } from '@/stores/modal';
 import { useNotificationStore } from '@/stores/notification';
 import { usePermissionStore } from '@/stores/permission';
 import { useTeamStore } from '@/stores/team';
@@ -78,6 +72,18 @@ const busy = ref('');
 const fileList = ref<{ focusEntry: (key?: string) => void }>();
 const detailsOpen = ref(false);
 const detailsFile = ref({ key: '', name: '' });
+useDialog(ModalType.FILE_DETAILS_DIALOG, {
+  visible: () => detailsOpen.value,
+  props: () => ({
+    fileKey: detailsFile.value.key,
+    fileName: detailsFile.value.name,
+    source: 'recent',
+    onResolved: applyDetails,
+  }),
+  onClose: () => {
+    detailsOpen.value = false;
+  },
+});
 let controller: AbortController | undefined;
 let directoryController: AbortController | undefined;
 let disposed = false;

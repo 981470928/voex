@@ -21,17 +21,29 @@
         <RouterLink class="team-ui__button" :to="{ name: 'teams' }">前往团队</RouterLink>
       </div>
     </section>
-    <JoinTeamDialog v-model="open" :invite-token="token" @applied="applied = true" />
   </main>
 </template>
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import JoinTeamDialog from '@/components/team/JoinTeamDialog.vue';
+import { useDialog } from '@/composables/useDialog';
+import { ModalType } from '@/stores/modal';
 const route = useRoute();
 const token = computed(() => route.hash.slice(1));
 const open = ref(true);
 const applied = ref(false);
+useDialog(ModalType.JOIN_TEAM_DIALOG, {
+  visible: () => open.value,
+  props: () => ({
+    inviteToken: token.value,
+    onApplied: () => {
+      applied.value = true;
+    },
+  }),
+  onClose: () => {
+    open.value = false;
+  },
+});
 </script>
 <style scoped lang="stylus">
 @import '../../components/team/team.styl'

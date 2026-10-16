@@ -3,7 +3,7 @@
     :id="menuId"
     ref="menu"
     class="context-menu-list"
-    :style="position"
+    :style="{ ...floatingStyle, visibility: isPositioned ? 'visible' : 'hidden' }"
     role="menu"
     :aria-label="label"
     tabindex="-1"
@@ -76,8 +76,11 @@ import {
   onMounted,
   ref,
   useId,
+  watch,
   type ComponentPublicInstance,
 } from 'vue';
+import { flip, shift, size } from '@floating-ui/dom';
+import { useFloating } from '@/composables/useFloating';
 import SvgIcon from '@/components/SvgIcon.vue';
 import type { ContextMenuItem, ContextMenuOption } from './types';
 
@@ -106,12 +109,16 @@ const buttons = new Map<number, HTMLButtonElement>();
 const activeIndex = ref(-1);
 const expandedIndex = ref<number | null>(null);
 const submenuDirection = ref(props.direction);
-const position = ref({
-  left: '0px',
-  top: '0px',
-  maxWidth: 'calc(100vw - 16px)',
-  maxHeight: 'calc(100dvh - 16px)',
+let focusRequested = false;
+const floating = useFloating({
+  onUpdate({ placement }) {
+    submenuDirection.value =
+      placement.startsWith('left') || (!props.anchor && placement.endsWith('end'))
+        ? 'left'
+        : 'right';
+  },
 });
+const { floatingStyle, isPositioned } = floating;
 const expandedItem = computed(() => {
   const item = expandedIndex.value === null ? undefined : props.items[expandedIndex.value];
   return item && !item.separator && !item.disabled ? item : undefined;
@@ -120,48 +127,64 @@ const enabledIndices = computed(() =>
   props.items.flatMap((item, index) => (!item.separator && !item.disabled ? [index] : []))
 );
 let hoverTimer: ReturnType<typeof setTimeout> | undefined;
-let observer: ResizeObserver | undefined;
 
 function setButton(index: number, element: Element | ComponentPublicInstance | null) {
   if (element instanceof HTMLButtonElement) buttons.set(index, element);
   else buttons.delete(index);
 }
 
-function updatePosition() {
+function syncPosition() {
   if (!menu.value) return;
-  const viewport = window.visualViewport;
-  const margin = 8;
-  const left = (viewport?.offsetLeft ?? 0) + margin;
-  const top = (viewport?.offsetTop ?? 0) + margin;
-  const width = (viewport?.width ?? window.innerWidth) - margin * 2;
-  const height = (viewport?.height ?? window.innerHeight) - margin * 2;
-  const rect = menu.value.getBoundingClientRect();
-  const anchor = props.anchor?.getBoundingClientRect();
-  let direction = props.direction;
-  let x = anchor ? (direction === 'left' ? anchor.left - rect.width : anchor.right) : props.x;
-  const y = anchor?.top ?? props.y;
-  if (x + rect.width > left + width) {
-    x = (anchor?.left ?? props.x) - rect.width;
-    direction = 'left';
-  } else if (anchor && x < left) {
-    x = anchor.right;
-    direction = 'right';
-  }
-  submenuDirection.value = direction;
-  position.value = {
-    left: `${Math.max(left, Math.min(x, left + width - rect.width))}px`,
-    top: `${Math.max(top, Math.min(y, top + height - rect.height))}px`,
-    maxWidth: `${Math.max(0, width)}px`,
-    maxHeight: `${Math.max(0, height)}px`,
-  };
+  floating.virtualElement.getBoundingClientRect = floating.generateGetBoundingClientRect(
+    props.x,
+    props.y
+  );
+  floating.init(props.anchor ?? floating.virtualElement, menu.value, {
+    strategy: 'fixed',
+    placement: props.anchor ? `${props.direction}-start` : 'bottom-start',
+    middleware: [
+      flip({
+        padding: 8,
+        fallbackPlacements: props.anchor
+          ? [props.direction === 'left' ? 'right-start' : 'left-start']
+          : ['top-start', 'bottom-end', 'top-end'],
+      }),
+      shift({ padding: 8, crossAxis: true }),
+      size({
+        padding: 8,
+        apply({ availableWidth, availableHeight, elements }) {
+          Object.assign(elements.floating.style, {
+            maxWidth: `${Math.max(0, availableWidth)}px`,
+            maxHeight: `${Math.max(0, availableHeight)}px`,
+          });
+        },
+      }),
+    ],
+  });
+  floating.show();
 }
+
+watch([() => props.x, () => props.y, () => props.anchor, () => props.direction], syncPosition, {
+  flush: 'post',
+});
 
 function cancelHover() {
   clearTimeout(hoverTimer);
   hoverTimer = undefined;
 }
 
+watch(
+  isPositioned,
+  (positioned) => {
+    if (positioned && focusRequested) focusFirst();
+  },
+  { flush: 'post' }
+);
+
 function focusFirst() {
+  focusRequested = true;
+  if (!menu.value?.isConnected || !isPositioned.value) return;
+  focusRequested = false;
   const first = enabledIndices.value[0];
   if (first === undefined) menu.value?.focus({ preventScroll: true });
   else focusItem(first);
@@ -239,20 +262,18 @@ function handleKeydown(event: KeyboardEvent) {
 }
 
 onMounted(() => {
-  updatePosition();
-  observer = new ResizeObserver(updatePosition);
-  if (menu.value) observer.observe(menu.value);
+  syncPosition();
   if (props.autofocus) focusFirst();
 });
 onBeforeUnmount(() => {
   cancelHover();
-  observer?.disconnect();
 });
 defineExpose({ focusFirst });
 </script>
 
 <style scoped lang="stylus">
 .context-menu-list
+  box-sizing border-box
   position fixed
   width 224px
   padding 4px

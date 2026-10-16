@@ -65,7 +65,7 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, ref, useId, watch } from 'vue';
-import { onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
+import { useRouter, type RouteLocationNormalized } from 'vue-router';
 import { VoexModal } from '@/plugins/voex-modal';
 import {
   applyToTeam,
@@ -82,6 +82,7 @@ const props = withDefaults(defineProps<{ modelValue: boolean; inviteToken?: stri
 const emit = defineEmits<{ 'update:modelValue': [boolean]; applied: [JoinRequest] }>();
 const id = useId();
 const { confirm } = useConfirm();
+const router = useRouter();
 const notification = useNotificationStore();
 const code = ref('');
 const message = ref('');
@@ -185,9 +186,20 @@ function beforeUnload(event: BeforeUnloadEvent) {
   }
 }
 window.addEventListener('beforeunload', beforeUnload);
-onBeforeRouteLeave(canLeave);
-onBeforeRouteUpdate(canLeave);
+let approvedNavigation: RouteLocationNormalized | undefined;
+const removeBeforeEach = router.beforeEach(async (to) => {
+  if (!props.modelValue) return;
+  if (!(await canLeave())) return false;
+  approvedNavigation = to;
+});
+const removeAfterEach = router.afterEach((to, _from, failure) => {
+  if (approvedNavigation !== to) return;
+  approvedNavigation = undefined;
+  if (!failure && props.modelValue) emit('update:modelValue', false);
+});
 onBeforeUnmount(() => {
+  removeBeforeEach();
+  removeAfterEach();
   active = false;
   controller?.abort();
   window.removeEventListener('beforeunload', beforeUnload);

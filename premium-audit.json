@@ -2,7 +2,7 @@
   "findings": [
     {
       "category": "unresolved",
-      "file": "src/components/milkdown/PexelsDialog.vue",
+      "file": "src/views/edit/milkdown/PexelsDialog.vue",
       "line": 41,
       "message": "Native select is used without an explicit ownership decision.",
       "remediation": "Record Select/Listbox as native or reuse the authored canonical owner.",

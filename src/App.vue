@@ -2,8 +2,12 @@
 <template>
   <div class="the-app">
     <router-view />
-    <component :is="item.component" v-for="(item, key) in modalStore.modalInstanceMap" :key="key" />
-    <FileViewerDialog />
+    <component
+      :is="item.component"
+      v-for="item in modalStore.renderedModals"
+      :key="item.key"
+      v-bind="item.props"
+    />
     <NotificationBar />
     <SessionRecovery />
   </div>
@@ -12,7 +16,6 @@
 <script setup lang="ts">
 import { useThemeStore } from '@/stores/theme';
 import { useModalStore } from '@/stores/modal';
-import FileViewerDialog from '@/components/dialog/FileViewerDialog.vue';
 import NotificationBar from '@/components/NotificationBar.vue';
 import SessionRecovery from '@/components/auth/SessionRecovery.vue';
 const modalStore = useModalStore();

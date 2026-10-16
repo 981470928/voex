@@ -2,7 +2,7 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { isAxiosError } from 'axios';
-import MilkdownEditor from '@/components/milkdown/MilkdownEditor.vue';
+import MilkdownEditor from '@/views/edit/milkdown/MilkdownEditor.vue';
 import { listFiles, deleteAttachment, downloadFile } from '@/service/api/upload-api';
 import {
   getDocument,

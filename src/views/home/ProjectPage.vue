@@ -100,18 +100,6 @@
         </button>
       </template>
     </FileList>
-    <ProjectPrivilegesDialog
-      v-if="tree"
-      v-model="privilegesOpen"
-      :project="tree.project"
-      @saved="permissionsSaved"
-    />
-    <FileDetailsDialog
-      v-model="detailsOpen"
-      :file-key="detailsFile.key"
-      :file-name="detailsFile.name"
-      source="project"
-    />
   </main>
 </template>
 
@@ -128,17 +116,16 @@ import {
 } from '@/service/api/workspace-api';
 import { updateDocument, deleteDocument } from '@/service/api/document-api';
 import FileList from '@/components/files/FileList.vue';
-import FileDetailsDialog from '@/components/files/FileDetailsDialog.vue';
 import type { FileListEntry } from '@/components/files/types';
 import { usePermissionStore, type ResourcePermissions } from '@/stores/permission';
 import { desktopLocation as workspaceLocation, folderAncestors } from '@/utils/workspace';
 import { errorMessage } from '@/utils/error';
 import { useConfirm } from '@/composables/useConfirm';
+import { useDialog } from '@/composables/useDialog';
 import { useCreateDocument } from '@/composables/useCreateDocument';
 import { useModalStore, ModalType } from '@/stores/modal';
 import { useNotificationStore } from '@/stores/notification';
 import { MessageType } from '@/constant/status';
-import ProjectPrivilegesDialog from '@/components/team/ProjectPrivilegesDialog.vue';
 import { useTeamStore } from '@/stores/team';
 import type { ContextMenuItem } from '@/plugins/context-menu';
 
@@ -162,6 +149,24 @@ const currentTeam = computed(() =>
 const { confirm } = useConfirm();
 const { creating, openCreateDocument } = useCreateDocument();
 const tree = ref<ProjectTree | null>(null);
+useDialog(ModalType.PROJECT_PRIVILEGES_DIALOG, {
+  visible: () => privilegesOpen.value && !!tree.value,
+  props: () => ({ project: tree.value!.project, onSaved: permissionsSaved }),
+  onClose: () => {
+    privilegesOpen.value = false;
+  },
+});
+useDialog(ModalType.FILE_DETAILS_DIALOG, {
+  visible: () => detailsOpen.value,
+  props: () => ({
+    fileKey: detailsFile.value.key,
+    fileName: detailsFile.value.name,
+    source: 'project',
+  }),
+  onClose: () => {
+    detailsOpen.value = false;
+  },
+});
 const loading = ref(true);
 const busy = ref(false);
 const loadError = ref('');
