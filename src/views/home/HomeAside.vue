@@ -515,6 +515,7 @@ const mainItems = [
   { label: '最近文件', icon: 'clock-outline', routeName: 'recent' },
   { label: '回收站', icon: 'trash', routeName: 'trash' },
   { label: '团队与成员', icon: 'users', routeName: 'teams' },
+  { label: '系统升级', icon: 'setting', routeName: 'system' },
   // { label: 'Pulse', icon: 'pulse' },
   // { label: 'Inbox', icon: 'inbox' },
   // { label: 'My issues', icon: 'issues' },

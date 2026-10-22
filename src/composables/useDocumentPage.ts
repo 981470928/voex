@@ -27,6 +27,7 @@ import { MessageType } from '@/constant/status';
 import { useConfirm } from './useConfirm';
 import { useCreateDocument } from './useCreateDocument';
 import { applyAIReview } from '@/service/api/ai-api';
+import { hasLegacyTableWidthMetadata } from '@/views/edit/milkdown/table-widths';
 import type { DocumentSnapshot, ReviewSnapshot } from '@/agent/types';
 
 const AUTO_SAVE_DELAY = 2000;
@@ -184,9 +185,12 @@ export function useDocumentPage() {
   }
 
   function handleEditorReady(markdown: string) {
-    savedContent.value = markdown;
+    const stored = activeDoc.value?.file_content ?? markdown;
+    const cleanupLegacyMetadata = stored !== markdown && hasLegacyTableWidthMetadata(stored);
+    savedContent.value = cleanupLegacyMetadata ? stored : markdown;
     currentContent.value = markdown;
     editorReady.value = true;
+    if (cleanupLegacyMetadata) handleEditorActivity();
   }
 
   function handleEditorChange(markdown: string) {

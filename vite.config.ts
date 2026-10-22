@@ -4,9 +4,9 @@ import vue from '@vitejs/plugin-vue';
 import vueDevTools from 'vite-plugin-vue-devtools';
 import { createSvgIconsPlugin } from 'vite-plugin-svg-icons';
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
   return {
-    base: '/app/',
+    base: command === 'build' && mode === 'test' ? '/test/' : '/app/',
     plugins: [
       vue(),
       vueDevTools(),

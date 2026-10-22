@@ -36,7 +36,8 @@ interface EditorInteractionOptions {
   onAttachment: () => void;
   onLink: () => void;
   onPexels: () => void;
-  colorActions?: EditorAction[];
+  onColorToolbar?: (element: HTMLElement | null) => void;
+  isColorMenuOpen?: () => boolean;
 }
 
 interface SlashAction extends EditorAction {
@@ -284,14 +285,21 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
   plugins: MilkdownPlugin[];
   configure: (ctx: Ctx) => void;
   hide: () => void;
+  refresh: () => void;
 } {
   const id = ++interactionId;
   const tooltip = tooltipFactory(`voex-format-${id}`);
   const slash = slashFactory(`voex-slash-${id}`);
   const hideCallbacks = new Set<() => void>();
+  let refreshTooltip: (() => void) | undefined;
   const canEdit = (view: EditorView) => !options.readonly() && view.editable && !view.isDestroyed;
 
-  const watchDismissal = (view: EditorView, element: HTMLElement, hide: () => void) => {
+  const watchDismissal = (
+    view: EditorView,
+    element: HTMLElement,
+    hide: () => void,
+    onScroll?: () => void
+  ) => {
     const controller = new AbortController();
     const { signal } = controller;
     const document = view.dom.ownerDocument;
@@ -317,7 +325,8 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
       'scroll',
       (event) => {
         if (event.target instanceof Node && element.contains(event.target)) return;
-        hide();
+        if (onScroll) onScroll();
+        else hide();
       },
       { capture: true, passive: true, signal }
     );
@@ -332,9 +341,11 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
   return {
     plugins: [...block, ...tooltip, ...slash],
     hide: () => hideCallbacks.forEach((hide) => hide()),
+    refresh: () => refreshTooltip?.(),
     configure: (ctx) => {
       let focusTooltip: (() => boolean) | undefined;
       let handleSlashKey: ((event: KeyboardEvent) => boolean) | undefined;
+      let revealInsertedSlash: (() => void) | undefined;
       let moveBlock: ((position: number, direction: number) => boolean) | undefined;
       // view 级键盘处理先于 preset keymap，避免 Enter 提前拆分段落。
       ctx.update(editorViewOptionsCtx, (previous) => ({
@@ -356,10 +367,7 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
         view: (view) => {
           const element = createPopover(view, 'milkdown-editor__format', '选区格式');
           element.setAttribute('role', 'toolbar');
-          const actions = [
-            ...createFormattingActions(options.onLink),
-            ...(options.colorActions ?? []),
-          ];
+          const actions = createFormattingActions(options.onLink);
           const buttons = actions.map((action) => {
             const button = createButton(
               view.dom.ownerDocument,
@@ -367,6 +375,19 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
               action.label,
               action.text
             );
+            if (action.id === 'link') {
+              const document = view.dom.ownerDocument;
+              const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+              svg.setAttribute('width', '16');
+              svg.setAttribute('height', '16');
+              svg.setAttribute('viewBox', '0 0 16 16');
+              svg.setAttribute('aria-hidden', 'true');
+              svg.setAttribute('focusable', 'false');
+              const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+              use.setAttribute('href', '#icon-editor-link');
+              svg.append(use);
+              button.replaceChildren(svg);
+            }
             button.dataset.action = action.id;
             button.dataset.format = action.id;
             if (action.opensDialog) button.setAttribute('aria-haspopup', 'dialog');
@@ -380,6 +401,13 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
             element.append(button);
             return button;
           });
+          const colorToolbar = view.dom.ownerDocument.createElement('div');
+          colorToolbar.className = 'milkdown-editor__color-controls';
+          element.append(colorToolbar);
+          options.onColorToolbar?.(colorToolbar);
+          const enabledButtons = () => [
+            ...element.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'),
+          ];
           const refresh = () => {
             buttons.forEach((button, index) => {
               const action = actions[index]!;
@@ -404,7 +432,9 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
                 selection instanceof TextSelection &&
                 !selection.empty &&
                 Boolean(doc.textBetween(selection.from, selection.to)) &&
-                (view.hasFocus() || element.contains(view.dom.ownerDocument.activeElement))
+                (options.isColorMenuOpen?.() ||
+                  view.hasFocus() ||
+                  element.contains(view.dom.ownerDocument.activeElement))
               );
             },
           });
@@ -415,7 +445,9 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
           provider.onHide = () => {
             element.hidden = true;
           };
+          refreshTooltip = () => provider.update(view);
           const hide = () => {
+            if (canEdit(view) && options.isColorMenuOpen?.()) return;
             dismissed = true;
             element.hidden = true;
             provider.hide();
@@ -429,7 +461,7 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
               return;
             }
             if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-            const enabled = buttons.filter((button) => !button.disabled);
+            const enabled = enabledButtons();
             if (!enabled.length) return;
             const index = enabled.findIndex(
               (button) => button === view.dom.ownerDocument.activeElement
@@ -448,7 +480,7 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
             if (!canEdit(view) || view.state.selection.empty) return false;
             dismissed = false;
             provider.update(view);
-            const button = buttons.find((item) => !item.disabled);
+            const button = enabledButtons()[0];
             button?.focus();
             return Boolean(button);
           };
@@ -465,6 +497,8 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
             },
             destroy: () => {
               focusTooltip = undefined;
+              refreshTooltip = undefined;
+              options.onColorToolbar?.(null);
               cleanup();
               provider.destroy();
               element.remove();
@@ -502,7 +536,15 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
           let composing = false;
           let compositionUntil = 0;
           let compositionTimer: ReturnType<typeof setTimeout> | undefined;
+          let insertScrollTimer: ReturnType<typeof setTimeout> | undefined;
+          let insertScrollKey = '';
+          const scrollEvents = new AbortController();
           let destroyed = false;
+          const stopInsertScroll = () => {
+            clearTimeout(insertScrollTimer);
+            insertScrollTimer = undefined;
+            insertScrollKey = '';
+          };
           const priorControls = view.dom.getAttribute('aria-controls');
           const priorActive = view.dom.getAttribute('aria-activedescendant');
           const resetAria = () => {
@@ -621,12 +663,58 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
             resetAria();
           };
           const hide = () => {
+            stopInsertScroll();
             dismissed = rangeKey(slashRange(view));
             element.hidden = true;
             provider.hide();
           };
-          const cleanup = watchDismissal(view, element, hide);
+          const finishInsertScroll = () => {
+            clearTimeout(insertScrollTimer);
+            insertScrollTimer = setTimeout(() => {
+              stopInsertScroll();
+              if (!destroyed) provider.update(view);
+            }, 150);
+          };
+          const cleanup = watchDismissal(view, element, hide, () => {
+            if (insertScrollKey && rangeKey(slashRange(view)) === insertScrollKey) {
+              // 加号触发的自动滚动只更新菜单定位，不作为用户关闭菜单。
+              provider.update(view);
+              finishInsertScroll();
+            } else hide();
+          });
+          const interruptInsertScroll = (event: Event) => {
+            if (insertScrollKey && event.target instanceof Node && !element.contains(event.target))
+              hide();
+          };
+          for (const type of ['wheel', 'touchstart'])
+            view.dom.ownerDocument.addEventListener(type, interruptInsertScroll, {
+              capture: true,
+              passive: true,
+              signal: scrollEvents.signal,
+            });
+          revealInsertedSlash = () => {
+            stopInsertScroll();
+            if (destroyed || !canEdit(view)) return;
+            const current = slashRange(view);
+            if (!current) return;
+            dismissed = '';
+            insertScrollKey = rangeKey(current);
+            provider.update(view);
+            const paragraph = view.nodeDOM(view.state.selection.$from.before());
+            if (paragraph instanceof Element)
+              paragraph.scrollIntoView({
+                block: 'nearest',
+                inline: 'nearest',
+                behavior: view.dom.ownerDocument.defaultView?.matchMedia(
+                  '(prefers-reduced-motion: reduce)'
+                ).matches
+                  ? 'instant'
+                  : 'smooth',
+              });
+            finishInsertScroll();
+          };
           compositionStarted = () => {
+            stopInsertScroll();
             composing = true;
             element.hidden = true;
             provider.hide();
@@ -675,13 +763,18 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
           };
           return {
             update: (nextView, previousState) => {
-              if (!slashRange(nextView)) dismissed = '';
+              const current = slashRange(nextView);
+              if (!current) dismissed = '';
+              if (insertScrollKey && rangeKey(current) !== insertScrollKey) stopInsertScroll();
               if (!canEdit(nextView)) hide();
               else provider.update(nextView, previousState);
             },
             destroy: () => {
               destroyed = true;
               clearTimeout(compositionTimer);
+              stopInsertScroll();
+              scrollEvents.abort();
+              revealInsertedSlash = undefined;
               handleSlashKey = undefined;
               compositionStarted = undefined;
               compositionEnded = undefined;
@@ -813,10 +906,11 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
               position,
               paragraph.create(null, view.state.schema.text('/'))
             );
-            tr.setSelection(TextSelection.create(tr.doc, position + 2)).scrollIntoView();
+            tr.setSelection(TextSelection.create(tr.doc, position + 2));
             hide();
             view.dispatch(tr);
             view.focus();
+            revealInsertedSlash?.();
           });
           // BlockProvider 在下一帧初始化；销毁时还需清理已排队的初始化。
           provider.update();

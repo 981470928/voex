@@ -245,14 +245,32 @@ export function createResizableImages(options: {
     const unit = document.createElement('span');
     unit.textContent = 'px';
     label.append(input, unit);
-    const apply = document.createElement('button');
-    apply.type = 'button';
-    apply.textContent = '应用';
-    apply.onmousedown = (event) => event.preventDefault();
-    const reset = document.createElement('button');
-    reset.type = 'button';
-    reset.textContent = '原始尺寸';
-    reset.onmousedown = (event) => event.preventDefault();
+    const iconButton = (name: string, label: string) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.title = label;
+      button.setAttribute('aria-label', label);
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('width', '16');
+      svg.setAttribute('height', '16');
+      svg.setAttribute('viewBox', '0 0 16 16');
+      svg.setAttribute('aria-hidden', 'true');
+      svg.setAttribute('focusable', 'false');
+      const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+      use.setAttribute('href', `#icon-${name}`);
+      svg.append(use);
+      button.append(svg);
+      button.onmousedown = (event) => event.preventDefault();
+      return button;
+    };
+    const separator = () => {
+      const element = document.createElement('span');
+      element.className = 'milkdown-editor__image-separator';
+      element.setAttribute('role', 'separator');
+      element.setAttribute('aria-orientation', 'vertical');
+      return element;
+    };
+    const reset = iconButton('image-original-size', '原始尺寸');
     const alignmentGroup = document.createElement('span');
     alignmentGroup.className = 'milkdown-editor__image-alignment';
     alignmentGroup.setAttribute('role', 'group');
@@ -260,14 +278,11 @@ export function createResizableImages(options: {
     const alignmentButtons = (
       [
         ['left', '左对齐'],
-        ['center', '居中'],
         ['right', '右对齐'],
+        ['center', '居中'],
       ] as const
     ).map(([alignment, text]) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.textContent = text;
-      button.onmousedown = (event) => event.preventDefault();
+      const button = iconButton(`editor-align-${alignment}`, text);
       button.onclick = () => commit({ alignment });
       alignmentGroup.append(button);
       return { alignment, button };
@@ -277,20 +292,18 @@ export function createResizableImages(options: {
     error.className = 'milkdown-editor__image-validation';
     error.setAttribute('role', 'alert');
     error.hidden = true;
-    const attachment = document.createElement('button');
-    attachment.type = 'button';
-    attachment.textContent = '显示为附件';
-    attachment.onmousedown = (event) => event.preventDefault();
+    const attachment = iconButton('attachment', '显示为附件');
     attachment.onclick = () => {
       const pos = getPos();
       if (canEdit() && pos !== undefined) options.onAttachment(view, pos, node);
     };
-    controls.append(label, apply, reset, alignmentGroup, attachment, error);
-    dom.append(image, fallback, handle, controls);
+    controls.append(label, separator(), alignmentGroup, separator(), reset, attachment);
+    dom.append(image, fallback, handle, controls, error);
 
     function positionControls() {
       if (!selected || !canEdit() || dismissed || drag) {
         controls.hidden = true;
+        error.hidden = true;
         return;
       }
       const rect = dom.getBoundingClientRect();
@@ -318,15 +331,26 @@ export function createResizableImages(options: {
         top = Math.max(top, toolbar.getBoundingClientRect().bottom);
       if (rect.bottom <= top || rect.top >= bottom || rect.right <= left || rect.left >= right) {
         controls.hidden = true;
+        error.hidden = true;
         return;
       }
       controls.hidden = false;
       controls.style.maxWidth = `${Math.max(0, right - left - 12)}px`;
       const height = controls.getBoundingClientRect().height;
       const width = controls.getBoundingClientRect().width;
-      controls.style.left = `${Math.max(left + 6, Math.min(rect.left, right - width - 6))}px`;
+      const centeredLeft = rect.left + (rect.width - width) / 2;
+      controls.style.left = `${Math.max(left + 6, Math.min(centeredLeft, right - width - 6))}px`;
       const above = rect.top - height - 8;
       controls.style.top = `${Math.max(top + 6, Math.min(above >= top + 6 ? above : rect.bottom + 8, bottom - height - 6))}px`;
+      error.hidden = !input.hasAttribute('aria-invalid');
+      if (!error.hidden) {
+        error.style.maxWidth = controls.style.maxWidth;
+        const bounds = controls.getBoundingClientRect();
+        const errorHeight = error.getBoundingClientRect().height;
+        const errorTop = bounds.bottom + 4;
+        error.style.left = controls.style.left;
+        error.style.top = `${Math.max(top + 6, Math.min(errorTop + errorHeight <= bottom - 6 ? errorTop : bounds.top - errorHeight - 4, bottom - errorHeight - 6))}px`;
+      }
     }
 
     const observer = new ResizeObserver(() => {
@@ -407,7 +431,7 @@ export function createResizableImages(options: {
       fallback.hidden = !failed && !loading;
       const loaded = !failed && image.complete && image.naturalWidth > 0;
       handle.hidden = !selected || !editable || dismissed || !loaded;
-      input.disabled = apply.disabled = !editable || !loaded;
+      input.disabled = !editable || !loaded;
       reset.disabled = !editable || parseWidth(node.attrs.width) === null;
       refreshInput();
       watchPosition(selected && editable && !dismissed);
@@ -456,11 +480,11 @@ export function createResizableImages(options: {
         error.hidden = false;
         input.setAttribute('aria-invalid', 'true');
         input.setAttribute('aria-describedby', error.id);
-        input.focus();
         positionControls();
         return;
       }
-      commit({ width });
+      // 保留输入焦点，连续输入和步进调整都立即更新当前图片。
+      commit({ width }, false);
     }
 
     function cancelResize() {
@@ -598,13 +622,14 @@ export function createResizableImages(options: {
         input.focus();
       }
     };
-    input.oninput = clearError;
+    input.oninput = applyWidth;
     const startComposition = () => {
       composing = true;
     };
     const endComposition = (event: CompositionEvent) => {
       composing = false;
       compositionEndedAt = event.timeStamp;
+      applyWidth();
     };
     input.addEventListener('compositionstart', startComposition);
     input.addEventListener('compositionend', endComposition);
@@ -615,7 +640,6 @@ export function createResizableImages(options: {
       if (!event.isComposing && !composing && event.timeStamp - compositionEndedAt >= 50)
         applyWidth();
     };
-    apply.onclick = applyWidth;
     reset.onclick = () => commit({ width: null });
     const refreshReadonly = () => {
       if (!canEdit()) cancelResize();
@@ -667,9 +691,9 @@ export function createResizableImages(options: {
         input.oninput = input.onkeydown = null;
         input.removeEventListener('compositionstart', startComposition);
         input.removeEventListener('compositionend', endComposition);
-        apply.onclick = reset.onclick = null;
+        reset.onclick = null;
         attachment.onclick = attachment.onmousedown = null;
-        apply.onmousedown = reset.onmousedown = null;
+        reset.onmousedown = null;
         alignmentButtons.forEach(({ button }) => {
           button.onclick = null;
           button.onmousedown = null;

@@ -4,25 +4,26 @@
 
 ## Canonical UI Map
 
-| Capability         | Canonical owner                                                                | Source of truth              | Allowed variants                        | Verification                 |
-| ------------------ | ------------------------------------------------------------------------------ | ---------------------------- | --------------------------------------- | ---------------------------- |
-| Form               | src/components/dialog/InputDialog.vue                                          | API 名称校验                 | 新建 / 重命名                           | 浏览器输入、提交、错误恢复   |
-| Auth form          | src/components/auth/AuthField.vue、ProfileFields.vue、LoginForm.vue            | 本次用户确认及 /api/auth API | 登录 / 注册 / 资料 / 重新登录           | Unicode、IME、错误、窄屏     |
-| Avator upload      | src/components/auth/AvatorPicker.vue、src/service/api/upload-api.ts            | /api/assets/upload           | 注册后上传 / 资料保存                   | 类型、大小、进度、失败恢复   |
-| Toast              | src/components/NotificationBar.vue                                             | src/stores/notification.ts   | success / error / info                  | 可访问提示、创建延时         |
-| File list / details | src/components/files/FileList.vue、FileDetailsDialog.vue | 本次文件详情需求、后端 docs/FILE-DETAILS-API.md | 项目目录 / 最近文件，网格 / 列表 | 权限菜单、路径跳转、键盘、窄屏 |
-| Resource permission | src/stores/permission.ts | 服务端 permissions 与 access | 项目、继承项目的文件夹、项目文件、分享/最近文件 | 只读、分享、撤销访问 |
-| Context menu       | src/plugins/context-menu/VoexContextMenu.vue                                   | 本文菜单交互约定             | 单级 / 多级菜单                         | 键盘、焦点、越界、权限禁用   |
-| CRUD               | src/composables/useCreateDocument.ts、src/composables/useDocumentPage.ts       | 后端 API.md                  | 创建后打开 / 删除后返回目录             | 浏览器目录→编辑              |
-| Scrollbar          | src/assets/style/main.css                                                      | DESIGN.md 与 theme.styl      | geometry only                           | 浏览器 computed style        |
-| Team form / action | src/components/team/team.styl、JoinTeamDialog.vue、ProjectPrivilegesDialog.vue | 本次团队方案、team-api.ts    | 申请 / 权限、沿用 VoexModal             | 错误、IME、焦点、窄屏        |
-| Download queue     | src/stores/download.ts、src/components/DownloadQueue.vue                       | 本次下载需求及附件 API       | 编辑页按钮浮层 / 分享附件底部内联区域   | 进度、中止、去重、浏览器保存 |
-| Select/Listbox     | 原生 select                                                                    | 浏览器/操作系统              | 团队选择、转让对象、回收站项目与每页条数；接受平台 popup 外观 | label、键盘、窄屏            |
-| Trash list | src/views/home/TrashPage.vue、src/service/api/trash-api.ts | ../voex-server-main/docs/trash_doc/frontend-integration.md | 有项目写权限的回收站、服务端分页 | 恢复、彻底删除、失败刷新、分页回退、窄屏 |
+| Capability          | Canonical owner                                                                   | Source of truth                                              | Allowed variants                                              | Verification                                |
+| ------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------- | ------------------------------------------- |
+| Form                | src/components/dialog/InputDialog.vue                                             | API 名称校验                                                 | 新建 / 重命名                                                 | 浏览器输入、提交、错误恢复                  |
+| Auth form           | src/components/auth/AuthField.vue、ProfileFields.vue、LoginForm.vue               | 本次用户确认及 /api/auth API                                 | 登录 / 注册 / 资料 / 重新登录                                 | Unicode、IME、错误、窄屏                    |
+| Avator upload       | src/components/auth/AvatorPicker.vue、src/service/api/upload-api.ts               | /api/assets/upload                                           | 注册后上传 / 资料保存                                         | 类型、大小、进度、失败恢复                  |
+| Toast               | src/components/NotificationBar.vue                                                | src/stores/notification.ts                                   | success / error / info                                        | 可访问提示、创建延时                        |
+| File list / details | src/components/files/FileList.vue、FileDetailsDialog.vue                          | 本次文件详情需求、后端 docs/FILE-DETAILS-API.md              | 项目目录 / 最近文件，网格 / 列表                              | 权限菜单、路径跳转、键盘、窄屏              |
+| Resource permission | src/stores/permission.ts                                                          | 服务端 permissions 与 access                                 | 项目、继承项目的文件夹、项目文件、分享/最近文件               | 只读、分享、撤销访问                        |
+| Context menu        | src/plugins/context-menu/VoexContextMenu.vue                                      | 本文菜单交互约定                                             | 单级 / 多级菜单                                               | 键盘、焦点、越界、权限禁用                  |
+| CRUD                | src/composables/useCreateDocument.ts、src/composables/useDocumentPage.ts          | 后端 API.md                                                  | 创建后打开 / 删除后返回目录                                   | 浏览器目录→编辑                             |
+| Scrollbar           | src/assets/style/main.css                                                         | DESIGN.md 与 theme.styl                                      | geometry only                                                 | 浏览器 computed style                       |
+| Team form / action  | src/components/team/team.styl、JoinTeamDialog.vue、ProjectPrivilegesDialog.vue    | 本次团队方案、team-api.ts                                    | 申请 / 权限、沿用 VoexModal                                   | 错误、IME、焦点、窄屏                       |
+| Download queue      | src/stores/download.ts、src/components/DownloadQueue.vue                          | 本次下载需求及附件 API                                       | 编辑页按钮浮层 / 分享附件底部内联区域                         | 进度、中止、去重、浏览器保存                |
+| Select/Listbox      | 原生 select                                                                       | 浏览器/操作系统                                              | 团队选择、转让对象、回收站项目与每页条数；接受平台 popup 外观 | label、键盘、窄屏                           |
+| Trash list          | src/views/home/TrashPage.vue、src/service/api/trash-api.ts                        | ../voex-server-main/docs/trash_doc/frontend-integration.md   | 有项目写权限的回收站、服务端分页                              | 恢复、彻底删除、失败刷新、分页回退、窄屏    |
+| System upgrade      | src/views/system/SystemUpgradePage.vue、src/service/api/system-api.ts、useConfirm | 本次离线升级需求与 /api/system、/api/upgrade-status 接口契约 | 独立导入、确认启动、维护期间只读监控                          | 包校验、重试、断连/刷新恢复、账号隔离、窄屏 |
 
 ## 编辑页布局与面板
 
-编辑页左侧操作列依次是 AI、项目列表、导出、分享、附件、下载列表、debugTool（仅开发模式）和返回主页；后两项从标题栏迁入，debugTool 菜单在按钮右侧打开。默认收起右侧面板；EditPage 的 activePanel 保存互斥的 ai / projects / attachments 状态，再次点击对应按钮或关闭按钮收起。按钮用 aria-expanded 表达状态。桌面面板为非模态区域，键盘可进入，Escape 关闭并恢复入口焦点；关闭和切换面板保留 AI 草稿、对话实例以及项目目录展开与滚动状态，不中止正在生成的回复。
+编辑页左侧操作列依次是 AI、项目列表、导出、分享、附件、下载列表、设置、debugTool（仅开发模式）和返回主页；后两项从标题栏迁入，debugTool 菜单在按钮右侧打开。默认收起右侧面板；EditPage 的 activePanel 保存互斥的 ai / projects / attachments 状态，再次点击对应按钮或关闭按钮收起。按钮用 aria-expanded 表达状态。桌面面板为非模态区域，键盘可进入，Escape 关闭并恢复入口焦点；关闭和切换面板保留 AI 草稿、对话实例以及项目目录展开与滚动状态，不中止正在生成的回复。
 
 项目列表复用现有当前项目目录及文件操作，不扩展数据查询或权限范围。导出和分享复用原处理流程与权限。附件列表底部固定“添加附件”，复用现有上传、拖放、插入、预览和下载处理。
 
@@ -139,3 +140,49 @@ Pinia 只缓存当前账号的服务端历史和暂存未保存的回复。接�
 所有 `*Dialog` 必须注册到 `src/stores/modal.ts` 并由 App 统一挂载，业务组件不再直接嵌入 Dialog 标签。`useDialog` 负责将调用方显示状态和响应式参数同步到 store、接收业务事件，并在关闭或调用方卸载时释放该调用方的会话。同类型弹窗重复请求沿用拒绝并通知取消的约定，不能覆盖已打开弹窗；参数更新保留当前实例，只有会话 key 改变才重建。
 
 集中挂载不绕过 Dialog 内部的提交锁和未保存确认。关闭后恢复原入口焦点，卸载取消读取与定时任务；含草稿的团队申请和项目权限弹窗通过可撤销的 router 守卫保护导航，其他守卫取消导航时保留弹窗。文件预览也通过 modal store 管理，previewer 只负责准备文件与触发显示。
+
+## 离线系统升级
+
+来源为本次用户明确需求和 `/api/system/info`、`/api/system/releases`、`/api/system/packages`、`/api/system/upgrades`、`/api/system/upgrades/current` 及独立 `/api/upgrade-status/:jobID` 契约。侧栏提供 `/home/system`（`system`）入口；当前阶段所有已登录用户可升级，页面仍以服务端 `upgradeEnabled` / `canUpgrade` 和当前有效登录共同决定操作可用性。未配置、无权限、读取失败、版本空列表分别说明，不把失败当空列表。版本来自已导入的签名包，不提供在线更新检查。
+
+升级包接受 `.tar.gz` / `.tgz` / `.tar`，最大 2 GiB，使用独立 `timeout=0` 请求；不复用附件大小限制。选择后显式“导入升级包”，显示字节进度、校验等待、失败重试与取消；失败保留所选文件，离开正在导入的页面先确认中止。导入成功显示服务端签名校验后的版本并刷新已导入列表，不自动升级。版本选择接受系统原生 popup，禁用当前版本及 `fromVersions` 不匹配当前版本的包。选择目标只存在本页内存，不改变 URL。
+
+“开始升级”先用全局 ConfirmDialog 告知暂停服务、通知停止编辑、备份与失败可能恢复的影响。启动提交中禁止重复和离开；不确定完成的启动请求重试保留相同 UUID 和版本，不另建任务。任务启动后锁定导入/升级，显示服务端阶段及结果，不伪造升级进度。
+
+任务状态使用独立 fetch 与任务范围 `X-Upgrade-Watch-Token`，不走 Axios 401 自动刷新；短暂断连保留任务、退避重连。仅在 sessionStorage 保存当前账号、任务 ID 与只读监控凭证，凭证不进入 URL、日志、通知或 localStorage；恢复时校验格式、核对已知账号，账号切换清理旧任务。页面卸载中止本页请求、清理轮询与超时计时器，任务本身继续。
+
+维护期间刷新时，只有存在格式有效监控凭证的 `/home/system` 允许进入只读恢复视图；其他页面继续原路由鉴权，监控凭证不能解锁导入或升级。恢复视图先读取独立任务状态，任务结束后清除凭证、恢复正常登录身份，再读取系统版本。成功保留结果和重新加载入口；失败/中断保留服务端结果与备份提示，不声称恢复已经成功。页面恢复与真实升级、失败回滚分别验证，不以模拟状态代替实际升级证据。
+
+### v2 应用包与固定前端服务
+
+来源为本次用户批准的固定 Nginx 方案，操作说明见后端 `docs/DOCKER.md`。业务 API 和页面控件保持不变，用户仍分开执行导入与开始升级。v2 应用包严格包含 release.json、release.sig、images.tar（仅 API）和 frontend.tar.gz；签名清单使用 formatVersion=2 / frontendSHA256，不再包含 Web 镜像。
+
+导入只安全准备版本化 dist 并追加不覆盖的 hashed assets，不切换当前页面。正常应用升级迁移数据库、重建 API，再原子切换 frontend/current，相应失败恢复旧 frontend-version、数据库、环境和 API；固定 Nginx 保持运行，维护期间仍能读取页面与独立任务状态。已打开页面所需旧 assets 保留，不在升级或回滚时删除。结果页仍以服务端任务与实际恢复结果为准，不因前端切换而虚构成功。
+
+旧 v1 0.1.1 部署须由维护人员先使用 v2 完整安装包内 migrate-frontend.sh 完成一次基础设施转换，保留原应用版本、数据库与密钥；这次转换可一次性重建 Web / updater / API，完成后再由既有系统升级页面导入 0.2.0 包。该运维转换不增加业务界面的安装或容器管理控件。转换、正常升级、回滚和固定 Nginx 容器保持情况分别验证，不预写验证通过。
+
+## 编辑器表格、代码块与末尾输入
+
+Table Block 提供插入/删除行列、列对齐及行列重排；editor-tables 适配官方节点视图的 colgroup 与更新生命周期，保留列宽拖拽和横向滚动位置。列宽拖拽写入表格单元格属性，并保存到浏览器本地元数据，不向 Markdown 正文写入额外注释或数据，读取时恢复。只读时隐藏并禁用修改操作。
+
+Code Block 使用官方 CodeMirror 节点视图；语言、代码修改和查找替换写回 Markdown，撤销沿用 Milkdown 历史。原生语言 select 接受系统 popup；只读可复制、查找和折叠，禁止改语言、替换和编辑。Tab 缩进，Escape 后 Tab 离开代码区，Ctrl/Cmd+Enter 继续正文。复制失败时选中代码并提示手动复制。
+
+Trailing 仅在可编辑状态下为末尾非段落、非标题节点补充空段落；只读文档不因该插件追加内容。编辑页和分享页继续复用同一 MilkdownEditor。
+
+
+## 文档小地图
+
+用户确认采用 dom-minimap + 复杂节点占位，正文右侧显示。独立入口为 `src/plugins/document-minimap`，Milkdown 仅传入正文选择器与节点规则；不改变 Markdown、保存链路和编辑事务。首次 idle 构建后按顶层块增量更新，复杂子树从克隆入口跳过；滚动只同步几何位置，尺寸或内容真实变化才重新测量或替换对应块。
+
+可编辑与只读均支持点击、拖拽定位及滚轮；Tab 聚焦后可用方向键、Page Up / Down、Home / End。复制内容 inert 且对辅助技术隐藏，单一 scrollbar 提供位置和可访问名称。手机端不挂载该功能，平板沿用桌面逻辑，不提供窄屏适配。桌面加载期间预留列位；正文空间不足时隐藏并释放副本、observer、定时器与监听，切换文档后跟随当前正文，不保留旧文件副本。
+
+
+## 用户级编辑设置
+
+来源：本次用户明确需求与 `/home/voex-server/docs/USER-CONFIG-API.md`。左侧操作列的“设置”以 VoexTrigger right-start 非模态浮层展开，点击外部、再次点击入口、关闭按钮或 Escape 收起；打开后焦点进入面板，关闭和 Escape 恢复入口焦点，使用普通 Tab 顺序，不宣称模态或焦点陷阱。
+
+目录和小地图分别由有中文名称、aria-checked 的原生 button switch 控制，支持 Enter/Space。`userConfig.editorOutlineVisible` 与 `userConfig.editorMinimapVisible` 为前端定义的布尔字段，缺省开启；初始化读取 GET /api/auth/me/config，统一通过 PATCH /api/auth/me/config 只提交当前变更的顶层字段，不整体回写或覆盖其他配置。存储以登录账号为准，不使用浏览器 localStorage 代替后端持久化。
+
+读取期间禁用开关并显示真实状态，失败保留默认/已有显示并提供“重新读取”。切换立即影响本页布局，保存期间禁用重复修改；服务端确认后标记已保存，失败恢复上次显示、显示未确认保存提示并提供“重试保存”。账号切换/退出立即清空旧状态、中止请求并拒绝旧响应，token 刷新不清空同账号偏好。设置不修改 Markdown、文档保存状态或分享页的默认行为。
+
+关闭目录时回收左列及空隙，同时保持标题、工具栏、正文与骨架左边界一致；小地图独立按偏好挂载/卸载并释放原有监听。小地图保留视口至少 1100px 的条件，目录关闭时以 800px 宿主门槛容纳正文与小地图，不因缺少目录列而永久无法显示。手机继续不挂载小地图，窄屏目录沿用既有隐藏策略。

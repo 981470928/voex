@@ -160,6 +160,7 @@ import {
   updateSharedFile,
   type SharedFile,
 } from '@/service/api/share-api';
+import { hasLegacyTableWidthMetadata } from '@/views/edit/milkdown/table-widths';
 
 const route = useRoute();
 const recentKey = computed(() =>
@@ -270,9 +271,12 @@ async function load() {
 }
 
 function onReady(markdown: string) {
+  const stored = file.value?.file_content ?? markdown;
+  const cleanupLegacyMetadata = stored !== markdown && hasLegacyTableWidthMetadata(stored);
   content.value = markdown;
-  savedContent.value = markdown;
+  savedContent.value = cleanupLegacyMetadata ? stored : markdown;
   ready.value = true;
+  if (cleanupLegacyMetadata) void save();
 }
 
 async function save() {

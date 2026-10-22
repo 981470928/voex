@@ -79,6 +79,7 @@
         <SvgIcon name="attachment" :size="20" />
       </button>
       <DownloadQueue variant="popover" />
+      <EditorSettings />
       <button
         v-if="isDev"
         ref="debugToolButton"
@@ -106,7 +107,10 @@
     </nav>
 
     <!-- Center: Editor -->
-    <main class="edit-page__center">
+    <main
+      class="edit-page__center"
+      :class="{ 'edit-page__center--without-outline': !userConfig.showOutline }"
+    >
       <div class="edit-page__header">
         <div class="edit-page__heading">
           <span
@@ -186,6 +190,8 @@
               :readonly="!documentReady || !canWrite || aiBusy"
               :loading="!documentReady"
               :show-toolbar="workspaceReady && !isMobile"
+              :show-outline="userConfig.showOutline"
+              :show-minimap="userConfig.showMinimap"
               @ready="displayedDocument.onReady"
               @load-error="displayedDocument.onError"
               @change="displayedDocument.onChange"
@@ -322,6 +328,8 @@ import type { FileCapabilities } from '@/agent/editor-tools';
 import SvgIcon from '@/components/SvgIcon.vue';
 import VoexDrawer from '@/components/VoexDrawer.vue';
 import DownloadQueue from '@/components/DownloadQueue.vue';
+import EditorSettings from '@/views/edit/EditorSettings.vue';
+import { useUserConfigStore } from '@/stores/user-config';
 import { useDownloadStore } from '@/stores/download';
 import { desktopLocation } from '@/utils/workspace';
 import { isMobile } from '@/utils/platform';
@@ -346,6 +354,7 @@ import {
   type ContextMenuOption,
 } from '@/plugins/context-menu';
 
+const userConfig = useUserConfigStore();
 const isDev = import.meta.env.DEV;
 const debugToolButton = ref<HTMLButtonElement | null>(null);
 const debugMenuOpen = ref(false);
@@ -799,6 +808,7 @@ async function handleExportDocument() {
     display flex
     flex-direction column
     align-items center
+    justify-content center
     flex-shrink 0
     width 64px
     gap 12px
@@ -865,27 +875,45 @@ async function handleExportDocument() {
   &__loading
     position absolute
     inset 0
+    width 100%
+    max-width var(--editor-layout-width)
+    margin 0 auto
     padding-top 45px
+    padding-left var(--editor-outline-space)
+    padding-right var(--editor-minimap-space)
     overflow hidden
 
   /* ---------- Center: editor ---------- */
   &__center
     --edit-content-width: 860px
     --edit-content-gutter: 52px
+    --editor-outline-width: 176px
+    --editor-outline-gap: 24px
+    --editor-outline-space: calc(var(--editor-outline-width) + var(--editor-outline-gap))
+    --editor-minimap-width: 112px
+    --editor-minimap-space: 0px
+    --editor-layout-width: calc(var(--edit-content-width) + var(--editor-outline-space) + var(--editor-minimap-space))
     flex 1
     display flex
     flex-direction column
     min-width 0
 
+    &--without-outline
+      --editor-outline-space: 0px
+
+    &:has(.milkdown-editor--minimap)
+      --editor-minimap-space: calc(var(--editor-minimap-width) + var(--editor-outline-gap))
 
   &__header
     display flex
     align-items center
     gap 12px
     width 100%
-    max-width var(--edit-content-width)
+    max-width var(--editor-layout-width)
     margin 0 auto
     padding 0 var(--edit-content-gutter)
+    padding-left calc(var(--editor-outline-space) + var(--edit-content-gutter))
+    padding-right calc(var(--edit-content-gutter) + var(--editor-minimap-space))
     flex-shrink 0
     text-align left
     height 56px
@@ -1082,6 +1110,11 @@ async function handleExportDocument() {
 
     &__header
       gap 8px
+
+  @media (max-width: 768px)
+    &__center
+      --editor-outline-width: 0px
+      --editor-outline-gap: 0px
 
   &__placeholder
     &--over-editor

@@ -1,172 +1,204 @@
 <template>
-  <section class="milkdown-editor" :class="{ 'milkdown-editor--readonly': readonly }">
-    <div
-      v-if="(!readonly || loading) && showToolbar"
-      ref="toolbarRef"
-      class="milkdown-editor__toolbar"
-      role="group"
-      aria-label="编辑工具"
-    >
-      <button
-        v-for="action in toolbarActions"
-        :key="action.id"
-        type="button"
-        class="milkdown-editor__action"
-        :class="{ 'milkdown-editor__action--active': toolbarState[action.id]?.active }"
-        :data-format="action.id"
-        :title="action.label"
-        :aria-label="action.label"
-        :aria-pressed="action.active ? !!toolbarState[action.id]?.active : undefined"
-        :aria-haspopup="action.opensDialog ? 'dialog' : undefined"
-        :disabled="loading || !ready || toolbarState[action.id]?.enabled === false"
-        @mousedown.prevent
-        @click="runAction(action)"
-      >
-        <SvgIcon v-if="action.id === 'link'" name="editor-link" :size="16" />
-        <template v-else>{{ action.text }}</template>
-      </button>
-      <VoexTrigger
-        v-for="item in colorControls"
-        :key="item.kind"
-        :popup-visible="colorSelection?.kind === item.kind"
-        trigger="click"
-        position="bottom-start"
-        strategy="fixed"
-        :popup-offset="6"
-        :disabled="loading || !ready || toolbarState[item.kind]?.enabled === false"
-        role="dialog"
-        :aria-label="item.label"
-        @update:popup-visible="setColorMenuVisible(item.kind, $event)"
-        @show="focusColorMenu(item.kind)"
+  <section
+    ref="editorRoot"
+    class="milkdown-editor"
+    :class="{
+      'milkdown-editor--readonly': readonly,
+      'milkdown-editor--outline': showOutline,
+      'milkdown-editor--minimap': minimapAvailable && supportsMinimap && showMinimap,
+    }"
+  >
+    <EditorOutline
+      v-if="showOutline"
+      :items="outlineItems"
+      :active-key="activeOutlineKey"
+      :navigating="outlineNavigating"
+      @select="scrollToOutline"
+    />
+    <div class="milkdown-editor__document">
+      <div
+        v-if="(!readonly || loading) && showToolbar"
+        ref="toolbarRef"
+        class="milkdown-editor__toolbar"
+        role="group"
+        aria-label="编辑工具"
       >
         <button
+          v-for="action in toolbarActions"
+          :key="action.id"
           type="button"
-          class="milkdown-editor__action milkdown-editor__color-button"
-          :class="{
-            'milkdown-editor__action--active':
-              toolbarState[item.kind]?.active || colorSelection?.kind === item.kind,
-          }"
-          :data-format="item.kind"
-          :title="item.label"
-          :aria-label="item.label"
-          aria-haspopup="dialog"
-          :disabled="loading || !ready || toolbarState[item.kind]?.enabled === false"
+          class="milkdown-editor__action"
+          :class="{ 'milkdown-editor__action--active': toolbarState[action.id]?.active }"
+          :data-format="action.id"
+          :title="action.label"
+          :aria-label="action.label"
+          :aria-pressed="action.active ? !!toolbarState[action.id]?.active : undefined"
+          :aria-haspopup="action.opensDialog ? 'dialog' : undefined"
+          :disabled="loading || !ready || toolbarState[action.id]?.enabled === false"
           @mousedown.prevent
-          @keydown.down.prevent="setColorMenuVisible(item.kind, true)"
+          @click="runAction(action)"
         >
-          <span class="milkdown-editor__color-icon" aria-hidden="true">
-            <SvgIcon :name="item.icon" :size="16" />
-            <span
-              class="milkdown-editor__color-indicator"
-              :style="{ backgroundColor: toolbarColors[item.kind] ?? item.defaultColor }"
-            />
-          </span>
-          <SvgIcon name="chevron-right" :size="10" class="milkdown-editor__color-chevron" />
+          <SvgIcon v-if="action.id === 'link'" name="editor-link" :size="16" />
+          <template v-else>{{ action.text }}</template>
         </button>
-        <template #content>
-          <div
-            :id="`${colorMenuId}-${item.kind}`"
-            class="milkdown-editor__color-menu"
-            @keydown.tab="handleColorMenuTab($event, item.kind)"
+        <div ref="toolbarColorHost" class="milkdown-editor__color-controls" />
+        <span v-if="allowAttachments" class="milkdown-editor__separator" aria-hidden="true" />
+        <button
+          type="button"
+          class="milkdown-editor__action"
+          :disabled="loading || !ready"
+          title="插入表情"
+          aria-label="插入表情"
+          aria-haspopup="dialog"
+          @mousedown.prevent
+          @click="openEmoji"
+        >
+          <SvgIcon name="face" :size="16" />
+        </button>
+        <button
+          type="button"
+          class="milkdown-editor__action"
+          :disabled="loading || !ready"
+          aria-haspopup="dialog"
+          title="图库"
+          aria-label="图库"
+          @mousedown.prevent
+          @click="openPexels"
+        >
+          <SvgIcon name="image" :size="16" />
+        </button>
+        <button
+          type="button"
+          class="milkdown-editor__action"
+          :disabled="loading || !ready"
+          title="插入或编辑 LaTeX 公式"
+          aria-label="插入或编辑 LaTeX 公式"
+          aria-haspopup="dialog"
+          @mousedown.prevent
+          @click="openLatex()"
+        >
+          <SvgIcon name="editor-formula" :size="16" />
+        </button>
+        <button
+          type="button"
+          class="milkdown-editor__action"
+          :disabled="loading || !ready"
+          title="插入或编辑流程图"
+          aria-label="插入或编辑流程图"
+          aria-haspopup="dialog"
+          @mousedown.prevent
+          @click="openMermaid()"
+        >
+          <SvgIcon name="diagram" :size="16" />
+        </button>
+        <button
+          v-if="allowAttachments"
+          type="button"
+          class="milkdown-editor__action"
+          :title="uploading ? '上传中…' : '添加附件'"
+          :aria-label="uploading ? '上传中…' : '添加附件'"
+          :disabled="loading || !ready || uploading"
+          :aria-busy="uploading"
+          @mousedown.prevent
+          @click="uploadAndInsertAttachments"
+        >
+          <SvgIcon
+            :name="uploading ? 'loading' : 'attachment'"
+            :size="16"
+            :class="{ 'milkdown-editor__uploading': uploading }"
+          />
+        </button>
+      </div>
+      <Teleport v-for="host in colorMenuHosts" :key="host.source" :to="host.element">
+        <VoexTrigger
+          v-for="item in colorControls"
+          :key="item.kind"
+          :popup-visible="
+            colorSelection?.source === host.source && colorSelection.kind === item.kind
+          "
+          trigger="click"
+          position="bottom-start"
+          strategy="fixed"
+          :popup-offset="6"
+          :disabled="loading || !ready || toolbarState[item.kind]?.enabled === false"
+          role="dialog"
+          :aria-label="item.label"
+          @update:popup-visible="setColorMenuVisible(item.kind, $event, host.source)"
+          @show="focusColorMenu(item.kind, host.source)"
+        >
+          <button
+            type="button"
+            class="milkdown-editor__action milkdown-editor__color-button"
+            :class="{
+              'milkdown-editor__action--active':
+                toolbarState[item.kind]?.active || colorSelection?.kind === item.kind,
+            }"
+            :data-format="item.kind"
+            :title="item.label"
+            :aria-label="item.label"
+            aria-haspopup="dialog"
+            :disabled="loading || !ready || toolbarState[item.kind]?.enabled === false"
+            @mousedown.prevent
+            @keydown.down.prevent="setColorMenuVisible(item.kind, true, host.source)"
           >
-            <ColorPicker v-model="colorDraft" :label="item.label" @change="applyMenuColor" />
-            <div class="milkdown-editor__color-footer">
-              <button
-                type="button"
-                class="milkdown-editor__color-clear"
-                :disabled="!colorSelection?.clearable"
-                @click="applyMenuColor(null)"
-              >
-                <SvgIcon name="eraser" :size="16" />
-                清除{{ item.label }}
-              </button>
-              <button
-                type="button"
-                class="milkdown-editor__color-apply"
-                @click="applyMenuColor(colorDraft)"
-              >
-                应用
-              </button>
+            <span class="milkdown-editor__color-icon" aria-hidden="true">
+              <SvgIcon :name="item.icon" :size="16" />
+              <span
+                class="milkdown-editor__color-indicator"
+                :style="{ backgroundColor: toolbarColors[item.kind] ?? item.defaultColor }"
+              />
+            </span>
+            <SvgIcon name="chevron-right" :size="10" class="milkdown-editor__color-chevron" />
+          </button>
+          <template #content>
+            <div
+              :id="`${colorMenuId}-${host.source}-${item.kind}`"
+              class="milkdown-editor__color-menu"
+              @keydown.tab="handleColorMenuTab($event, item.kind, host.source)"
+            >
+              <ColorPicker
+                :model-value="colorDraft"
+                :label="item.label"
+                @update:model-value="applyMenuColor"
+                @change="applyMenuColor"
+              />
+              <div class="milkdown-editor__color-footer">
+                <button
+                  type="button"
+                  class="milkdown-editor__color-clear"
+                  :disabled="!colorSelection?.clearable"
+                  @click="applyMenuColor(null)"
+                >
+                  <SvgIcon name="eraser" :size="16" />
+                  清除{{ item.label }}
+                </button>
+              </div>
             </div>
-          </div>
-        </template>
-      </VoexTrigger>
-      <span v-if="allowAttachments" class="milkdown-editor__separator" aria-hidden="true" />
-      <button
-        type="button"
-        class="milkdown-editor__action"
-        :disabled="loading || !ready"
-        title="插入表情"
-        aria-label="插入表情"
-        aria-haspopup="dialog"
-        @mousedown.prevent
-        @click="openEmoji"
-      >
-        <SvgIcon name="face" :size="16" />
-      </button>
-      <button
-        type="button"
-        class="milkdown-editor__action"
-        :disabled="loading || !ready"
-        aria-haspopup="dialog"
-        title="图库"
-        aria-label="图库"
-        @mousedown.prevent
-        @click="openPexels"
-      >
-        <SvgIcon name="image" :size="16" />
-      </button>
-      <button
-        type="button"
-        class="milkdown-editor__action"
-        :disabled="loading || !ready"
-        title="插入或编辑 LaTeX 公式"
-        aria-label="插入或编辑 LaTeX 公式"
-        aria-haspopup="dialog"
-        @mousedown.prevent
-        @click="openLatex()"
-      >
-        <SvgIcon name="editor-formula" :size="16" />
-      </button>
-      <button
-        type="button"
-        class="milkdown-editor__action"
-        :disabled="loading || !ready"
-        title="插入或编辑流程图"
-        aria-label="插入或编辑流程图"
-        aria-haspopup="dialog"
-        @mousedown.prevent
-        @click="openMermaid()"
-      >
-        <SvgIcon name="diagram" :size="16" />
-      </button>
-      <button
-        v-if="allowAttachments"
-        type="button"
-        class="milkdown-editor__action"
-        :title="uploading ? '上传中…' : '添加附件'"
-        :aria-label="uploading ? '上传中…' : '添加附件'"
-        :disabled="loading || !ready || uploading"
-        :aria-busy="uploading"
-        @mousedown.prevent
-        @click="uploadAndInsertAttachments"
-      >
-        <SvgIcon
-          :name="uploading ? 'loading' : 'attachment'"
-          :size="16"
-          :class="{ 'milkdown-editor__uploading': uploading }"
-        />
-      </button>
+          </template>
+        </VoexTrigger>
+      </Teleport>
+      <Milkdown :inert="loading" :aria-hidden="loading" />
     </div>
-    <Milkdown :inert="loading" :aria-hidden="loading" />
+    <DocumentMinimap
+      v-if="supportsMinimap && showMinimap"
+      :source-root="editorRoot"
+      :min-source-width="showOutline ? 1000 : 800"
+      :active="ready && !loading"
+      content-selector=".milkdown-editor__content"
+      :placeholders="editorMinimapPlaceholders"
+      :ignore-selectors="editorMinimapIgnoreSelectors"
+      @availability="minimapAvailable = $event"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, shallowRef, useId, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, useId, watch } from 'vue';
 import SvgIcon from '@/components/SvgIcon.vue';
 import ColorPicker from '@/components/ColorPicker.vue';
-import { useRecentColors } from '@/composables/useRecentColors';
+import EditorOutline from '@/views/edit/milkdown/EditorOutline.vue';
+import { DocumentMinimap } from '@/plugins/document-minimap';
+import { editorMinimapPlaceholders, editorMinimapIgnoreSelectors } from './editor-minimap';
 import { useDialog } from '@/composables/useDialog';
 import { VoexTrigger } from '@/plugins/trigger';
 import type { Mark } from '@milkdown/kit/prose/model';
@@ -182,24 +214,26 @@ import {
 } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
 import { commonmark } from '@milkdown/kit/preset/commonmark';
-import { gfm } from '@milkdown/kit/preset/gfm';
+import { columnResizingPlugin, gfm } from '@milkdown/kit/preset/gfm';
 import { history } from '@milkdown/kit/plugin/history';
 import { clipboard } from '@milkdown/kit/plugin/clipboard';
 import { cursor, dropIndicatorConfig } from '@milkdown/kit/plugin/cursor';
 import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
 import { indent, indentConfig } from '@milkdown/kit/plugin/indent';
 import { upload } from '@milkdown/kit/plugin/upload';
-import { prism } from '@milkdown/plugin-prism';
+import { trailing, trailingConfig } from '@milkdown/kit/plugin/trailing';
 import { undo, redo } from '@milkdown/kit/prose/history';
-import { Plugin, type SelectionBookmark } from '@milkdown/kit/prose/state';
+import { Plugin, type Selection, type SelectionBookmark } from '@milkdown/kit/prose/state';
 import { $prose, getMarkdown as serializeMarkdown } from '@milkdown/kit/utils';
 import { Milkdown, useEditor } from '@milkdown/vue';
 import '@milkdown/kit/prose/view/style/prosemirror.css';
 import '@milkdown/kit/prose/gapcursor/style/gapcursor.css';
 import '@milkdown/kit/prose/tables/style/tables.css';
 import type { FileInfo } from '@/service/api/document-api';
-import { ModalType, useModalStore } from '@/stores/modal';
+import { ModalType } from '@/stores/modal';
 import { useNotificationStore } from '@/stores/notification';
+import { useEditorStore } from '@/stores/editor';
+import { isMobile } from '@/utils/platform';
 import { errorMessage } from '@/utils/error';
 import {
   createAttachmentExtension,
@@ -207,6 +241,15 @@ import {
 } from '@/views/edit/milkdown/attachment';
 import { createEditorContent } from '@/views/edit/milkdown/editor-content';
 import { createEditorPaste } from '@/views/edit/milkdown/editor-paste';
+import { createEditorLinks } from '@/views/edit/milkdown/editor-links';
+import { createEditorTables } from '@/views/edit/milkdown/editor-tables';
+import { createEditorCodeBlock } from '@/views/edit/milkdown/editor-code-block';
+import '@/views/edit/milkdown/editor-code-block.styl';
+import {
+  editorOutlineElement,
+  readEditorOutline,
+  type EditorOutlineItem,
+} from '@/views/edit/milkdown/editor-outline';
 import {
   createImageImport,
   createImportedImage,
@@ -218,11 +261,7 @@ import type { Emoji } from '@/constant/emoji';
 import type { PexelsPhoto } from '@/service/api/pexels-api';
 import { createLatexExtension, type LatexAttrs } from '@/views/edit/milkdown/latex';
 import { createMermaidExtension } from '@/views/edit/milkdown/mermaid';
-import {
-  createTextColorExtension,
-  normalizeHexColor,
-  type TextColorKind,
-} from '@/views/edit/milkdown/text-color';
+import { createTextColorExtension, type TextColorKind } from '@/views/edit/milkdown/text-color';
 import {
   createEditorInteractions,
   createFormattingActions,
@@ -242,6 +281,8 @@ const props = withDefaults(
     readonly?: boolean;
     loading?: boolean;
     showToolbar?: boolean;
+    showOutline?: boolean;
+    showMinimap?: boolean;
   }>(),
   {
     defaultValue: '',
@@ -255,6 +296,8 @@ const props = withDefaults(
     readonly: false,
     loading: false,
     showToolbar: true,
+    showOutline: true,
+    showMinimap: true,
   }
 );
 
@@ -270,6 +313,21 @@ const ready = ref(false);
 const uploading = ref(false);
 const toolbarState = shallowRef<Record<string, { active: boolean; enabled: boolean }>>({});
 const toolbarRef = ref<HTMLElement>();
+const editorRoot = ref<HTMLElement | null>(null);
+const minimapAvailable = ref(false);
+const supportsMinimap = !isMobile;
+const outlineItems = shallowRef<EditorOutlineItem[]>([]);
+const activeOutlineKey = ref('');
+const outlineNavigating = ref(false);
+type ColorMenuSource = 'toolbar' | 'floating';
+const toolbarColorHost = ref<HTMLElement>();
+const floatingColorHost = shallowRef<HTMLElement | null>(null);
+const colorMenuHosts = computed(() => {
+  const hosts: { source: ColorMenuSource; element: HTMLElement }[] = [];
+  if (toolbarColorHost.value) hosts.push({ source: 'toolbar', element: toolbarColorHost.value });
+  if (floatingColorHost.value) hosts.push({ source: 'floating', element: floatingColorHost.value });
+  return hosts;
+});
 const colorMenuId = `editor-color-${useId()}`;
 const colorControls = [
   { kind: 'textColor', label: '文字颜色', icon: 'editor-text-color', defaultColor: '#FF0000' },
@@ -280,17 +338,18 @@ const toolbarColors = shallowRef<Record<TextColorKind, string | null>>({
   highlight: null,
 });
 const colorDraft = ref('#FF0000');
-const { addRecentColor } = useRecentColors();
 const colorSelection = shallowRef<{
   kind: TextColorKind;
+  source: ColorMenuSource;
   key: symbol;
   editor: Editor;
   version: number;
   marks: readonly Mark[] | null;
   clearable: boolean;
 } | null>(null);
-const modal = useModalStore();
 const notification = useNotificationStore();
+const editorStore = useEditorStore();
+const editorId = useId();
 const pendingAttachments: FileInfo[] = [];
 const bookmarks = new Map<symbol, SelectionBookmark>();
 const emojiSelection = shallowRef<{ key: symbol; editor: Editor; version: number } | null>(null);
@@ -386,30 +445,17 @@ const mermaidExtension = createMermaidExtension({
   onEdit: openMermaid,
 });
 const textColors = createTextColorExtension();
-const colorActions: EditorAction[] = (['textColor', 'highlight'] as const).flatMap((kind) => {
-  const label = kind === 'textColor' ? '文字颜色' : '背景色';
-  return [
-    {
-      id: kind,
-      label,
-      text: label,
-      opensDialog: true,
-      enabled: (ctx: Ctx) => textColors.enabled(ctx, kind),
-      active: (ctx: Ctx) => textColors.active(ctx, kind),
-      run: () => editTextColor(kind),
-    },
-    {
-      id: `${kind}-clear`,
-      label: `清除${label}`,
-      text: `清除${label}`,
-      enabled: (ctx: Ctx) => textColors.enabled(ctx, kind) && textColors.active(ctx, kind),
-      run: (ctx: Ctx) => {
-        textColors.apply(ctx, kind, null);
-        publishMarkdown(serializeMarkdown()(ctx));
-        ctx.get(editorViewCtx).focus();
-      },
-    },
-  ];
+const tables = createEditorTables({
+  readonly: () => props.readonly,
+  documentKey: () => props.documentKey,
+});
+const codeBlocks = createEditorCodeBlock({
+  readonly: () => props.readonly,
+  notify: (message, tone) => notification.show(message, tone),
+});
+const links = createEditorLinks({
+  readonly: () => props.readonly,
+  notify: (message, tone) => notification.show(message, tone),
 });
 const interactions = createEditorInteractions({
   readonly: () => props.readonly,
@@ -417,7 +463,10 @@ const interactions = createEditorInteractions({
   onAttachment: () => void uploadAndInsertAttachments(),
   onLink: editLink,
   onPexels: openPexels,
-  colorActions,
+  onColorToolbar: (element) => {
+    floatingColorHost.value = element;
+  },
+  isColorMenuOpen: () => colorSelection.value?.source === 'floating',
 });
 const toolbarActions: EditorAction[] = [
   ...[
@@ -446,17 +495,210 @@ function publishMarkdown(markdown: string) {
   emit('change', markdown);
 }
 
+type OutlineScrollTarget = HTMLElement | Window;
+
+const outlineMotionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+let outlineScrollTarget: OutlineScrollTarget | null = null;
+let outlineFrame = 0;
+let cleanupOutlineNavigation: (() => void) | null = null;
+
+function finishOutlineNavigation() {
+  cleanupOutlineNavigation?.();
+  cleanupOutlineNavigation = null;
+  outlineNavigating.value = false;
+}
+
+function beginOutlineNavigation(target: OutlineScrollTarget) {
+  finishOutlineNavigation();
+  outlineNavigating.value = true;
+  if (outlineFrame) {
+    cancelAnimationFrame(outlineFrame);
+    outlineFrame = 0;
+  }
+
+  let frame = 0;
+  let previousTop = target instanceof HTMLElement ? target.scrollTop : window.scrollY;
+  let stableSince = 0;
+  let moved = false;
+
+  const handleScrollEnd = (event: Event) => {
+    if (!moved) return;
+    if (event.target !== target && !(target === window && event.target === document)) return;
+    finishOutlineNavigation();
+  };
+
+  const checkScroll = (now: number) => {
+    const currentTop = target instanceof HTMLElement ? target.scrollTop : window.scrollY;
+    if (currentTop !== previousTop) {
+      moved = true;
+      previousTop = currentTop;
+      stableSince = now;
+    } else if (!stableSince) {
+      stableSince = now;
+    } else if (now - stableSince >= 160) {
+      // Covers older browsers, interrupted scrolling and jumps with no movement.
+      finishOutlineNavigation();
+      return;
+    }
+    frame = requestAnimationFrame(checkScroll);
+  };
+
+  target.addEventListener('scrollend', handleScrollEnd);
+  cleanupOutlineNavigation = () => {
+    cancelAnimationFrame(frame);
+    target.removeEventListener('scrollend', handleScrollEnd);
+  };
+  frame = requestAnimationFrame(checkScroll);
+}
+
+function findOutlineScrollTarget(element: HTMLElement): OutlineScrollTarget {
+  let parent = element.parentElement;
+  while (parent && parent !== document.body) {
+    const overflowY = window.getComputedStyle(parent).overflowY;
+    if (overflowY === 'auto' || overflowY === 'scroll') return parent;
+    parent = parent.parentElement;
+  }
+  return window;
+}
+
+function updateActiveOutline() {
+  if (outlineNavigating.value) return;
+  const items = outlineItems.value;
+  const editor = editorRef.value;
+  if (!items.length || !editor || editor.status !== EditorStatus.Created) {
+    activeOutlineKey.value = '';
+    return;
+  }
+
+  const view = editor.action((ctx) => ctx.get(editorViewCtx));
+  const target = outlineScrollTarget;
+  const targetTop = target instanceof HTMLElement ? target.getBoundingClientRect().top : 0;
+  const activationTop = targetTop + 65;
+  let active: EditorOutlineItem | undefined = items[0];
+
+  for (const item of items) {
+    const element = editorOutlineElement(view, item);
+    if (!element?.isConnected) continue;
+    if (element.getBoundingClientRect().top > activationTop) break;
+    active = item;
+  }
+
+  const scrollTop = target instanceof HTMLElement ? target.scrollTop : window.scrollY;
+  const viewportHeight = target instanceof HTMLElement ? target.clientHeight : window.innerHeight;
+  const scrollHeight =
+    target instanceof HTMLElement ? target.scrollHeight : document.documentElement.scrollHeight;
+  if (scrollTop > 0 && scrollTop + viewportHeight >= scrollHeight - 1) {
+    active = items[items.length - 1];
+  }
+  if (active) activeOutlineKey.value = active.key;
+}
+
+function scheduleOutlineUpdate() {
+  if (outlineNavigating.value || outlineFrame) return;
+  outlineFrame = requestAnimationFrame(() => {
+    outlineFrame = 0;
+    if (!disposed) updateActiveOutline();
+  });
+}
+
+function bindOutlineScrollTarget() {
+  const root = editorRoot.value;
+  if (!root || disposed) return;
+  const target = findOutlineScrollTarget(root);
+  if (target === outlineScrollTarget) return;
+
+  finishOutlineNavigation();
+  outlineScrollTarget?.removeEventListener('scroll', scheduleOutlineUpdate);
+  outlineScrollTarget = target;
+  target.addEventListener('scroll', scheduleOutlineUpdate, { passive: true });
+  scheduleOutlineUpdate();
+}
+
+function refreshOutline() {
+  const editor = editorRef.value;
+  if (!editor || editor.status !== EditorStatus.Created) {
+    outlineItems.value = [];
+    activeOutlineKey.value = '';
+    return;
+  }
+  const view = editor.action((ctx) => ctx.get(editorViewCtx));
+  outlineItems.value = readEditorOutline(view);
+  bindOutlineScrollTarget();
+  scheduleOutlineUpdate();
+}
+
+function scrollToOutline(item: EditorOutlineItem) {
+  const editor = editorRef.value;
+  if (disposed || outlineNavigating.value || !editor || editor.status !== EditorStatus.Created)
+    return;
+  editor.action((ctx) => {
+    const view = ctx.get(editorViewCtx);
+    const element = editorOutlineElement(view, item);
+    if (!element?.isConnected) return;
+    bindOutlineScrollTarget();
+    if (!outlineScrollTarget) return;
+    activeOutlineKey.value = item.key;
+    beginOutlineNavigation(outlineScrollTarget);
+    element.scrollIntoView({
+      behavior: outlineMotionPreference.matches ? 'instant' : 'smooth',
+      block: 'start',
+    });
+  });
+}
+
+watch(
+  editorRoot,
+  () => {
+    bindOutlineScrollTarget();
+  },
+  { flush: 'post' }
+);
+window.addEventListener('resize', scheduleOutlineUpdate);
+
+function syncSelection(ctx: Ctx, selection?: Selection, focused?: boolean) {
+  if (disposed) return;
+  const view = ctx.get(editorViewCtx);
+  // 插件初始化可能先触发选区事件，Created 时再同步完整 EditorView。
+  if (!view.state) return;
+  // selectionUpdated runs before the view state is updated; use its selection argument.
+  const current = selection ?? view.state.selection;
+  let selectedText = '';
+  if (!current.empty) {
+    const content = current.content().content;
+    selectedText = content.textBetween(0, content.size, '\n', (node) => {
+      if (node.type.name === 'hardbreak') return node.attrs.isInline ? ' ' : '\n';
+      return node.type.spec.leafText?.(node) ?? '';
+    });
+  }
+  editorStore.setSelection({
+    editorId,
+    documentKey: props.documentKey,
+    type: current.toJSON().type,
+    anchor: current.anchor,
+    head: current.head,
+    from: current.from,
+    to: current.to,
+    empty: current.empty,
+    selectedText,
+    focused: focused ?? view.hasFocus(),
+  });
+}
+
 function refreshToolbar(ctx: Ctx) {
   toolbarColors.value = {
     textColor: textColors.selected(ctx, 'textColor'),
     highlight: textColors.selected(ctx, 'highlight'),
   };
-  toolbarState.value = Object.fromEntries(
-    [...toolbarActions, ...colorActions].map((action) => [
+  toolbarState.value = Object.fromEntries([
+    ...toolbarActions.map((action) => [
       action.id,
       { active: action.active?.(ctx) ?? false, enabled: action.enabled?.(ctx) ?? true },
-    ])
-  );
+    ]),
+    ...colorControls.map(({ kind }) => [
+      kind,
+      { active: textColors.active(ctx, kind), enabled: textColors.enabled(ctx, kind) },
+    ]),
+  ]);
 }
 
 function runAction(action: EditorAction) {
@@ -483,7 +725,13 @@ const selectionPlugin = $prose(
           return null;
         },
       },
-      view: () => ({ update: () => refreshToolbar(ctx) }),
+      view: () => ({
+        update: (view, previousState) => {
+          refreshToolbar(ctx);
+          // Selected text can change without changing the selection offsets.
+          if (view.state.doc !== previousState.doc) syncSelection(ctx);
+        },
+      }),
     })
 );
 
@@ -725,57 +973,30 @@ async function uploadAndInsertAttachments() {
 function editLink() {
   const editor = editorRef.value;
   if (!canEdit(editor)) return;
-  const key = rememberSelection(editor);
-  const version = readonlyVersion;
-  const href = editor.action((ctx) => {
-    const { state } = ctx.get(editorViewCtx);
-    const marks = state.storedMarks ?? state.selection.$from.marks();
-    return marks.find((mark) => mark.type.name === 'link')?.attrs.href as string | undefined;
-  });
   interactions.hide();
-  modal.showModal(ModalType.INPUT_DIALOG, {
-    title: '插入链接',
-    tips: '链接地址',
-    defaultValue: href ?? 'https://',
-    okText: '插入',
-    onOK: (value) => {
-      const url = new URL(value, window.location.href);
-      if (!['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol))
-        throw new Error('请输入网页、邮件或电话链接');
-      if (!canEdit(editor) || version !== readonlyVersion) {
-        bookmarks.delete(key);
-        return;
-      }
-      editor.action((ctx) => {
-        restoreSelection(ctx, key);
-        const view = ctx.get(editorViewCtx);
-        const { state } = view;
-        const mark = state.schema.marks.link!.create({ href: value });
-        const { from, to, empty } = state.selection;
-        const transaction = empty
-          ? state.tr.replaceSelectionWith(state.schema.text(value, [mark]), false)
-          : state.tr.addMark(from, to, mark);
-        view.dispatch(transaction.scrollIntoView());
-      });
-      bookmarks.delete(key);
-    },
-    onCancel: () => bookmarks.delete(key),
-  });
+  editor.action((ctx) => links.edit(ctx));
 }
 
 function closeColorMenu() {
-  if (colorSelection.value) bookmarks.delete(colorSelection.value.key);
+  const session = colorSelection.value;
+  if (!session) return;
+  bookmarks.delete(session.key);
   colorSelection.value = null;
+  if (session.source === 'floating')
+    void nextTick(() => {
+      if (!disposed) interactions.refresh();
+    });
 }
 
-function setColorMenuVisible(kind: TextColorKind, visible: boolean) {
+function setColorMenuVisible(kind: TextColorKind, visible: boolean, source: ColorMenuSource) {
   if (!visible) {
-    if (colorSelection.value?.kind === kind) closeColorMenu();
+    if (colorSelection.value?.kind === kind && colorSelection.value.source === source)
+      closeColorMenu();
     return;
   }
   const editor = editorRef.value;
   if (!canEdit(editor) || !editor.action((ctx) => textColors.enabled(ctx, kind))) return;
-  if (colorSelection.value?.kind === kind) return;
+  if (colorSelection.value?.kind === kind && colorSelection.value.source === source) return;
   closeColorMenu();
   const initial = editor.action((ctx) => ({
     color: textColors.selected(ctx, kind),
@@ -784,9 +1005,10 @@ function setColorMenuVisible(kind: TextColorKind, visible: boolean) {
   }));
   colorDraft.value =
     initial.color ?? colorControls.find((item) => item.kind === kind)!.defaultColor;
-  interactions.hide();
+  if (source === 'toolbar') interactions.hide();
   colorSelection.value = {
     kind,
+    source,
     key: rememberSelection(editor),
     editor,
     version: readonlyVersion,
@@ -795,32 +1017,37 @@ function setColorMenuVisible(kind: TextColorKind, visible: boolean) {
   };
 }
 
-function colorMenuElement(kind: TextColorKind) {
-  return toolbarRef.value?.ownerDocument.getElementById(`${colorMenuId}-${kind}`);
+function colorMenuElement(kind: TextColorKind, source: ColorMenuSource) {
+  return colorMenuHosts.value
+    .find((host) => host.source === source)
+    ?.element.ownerDocument.getElementById(`${colorMenuId}-${source}-${kind}`);
 }
 
-function focusColorMenu(kind: TextColorKind) {
-  if (colorSelection.value?.kind === kind)
-    colorMenuElement(kind)
+function focusColorMenu(kind: TextColorKind, source: ColorMenuSource) {
+  if (colorSelection.value?.kind === kind && colorSelection.value.source === source)
+    colorMenuElement(kind, source)
       ?.querySelector<HTMLInputElement>('input')
       ?.focus({ preventScroll: true });
 }
 
-function handleColorMenuTab(event: KeyboardEvent, kind: TextColorKind) {
-  const controls = colorMenuElement(kind)?.querySelectorAll<HTMLElement>(
+function handleColorMenuTab(event: KeyboardEvent, kind: TextColorKind, source: ColorMenuSource) {
+  const controls = colorMenuElement(kind, source)?.querySelectorAll<HTMLElement>(
     'input:not(:disabled), button:not(:disabled)'
   );
   if (!controls?.length) return;
   const boundary = event.shiftKey ? controls[0] : controls[controls.length - 1];
   if (event.target !== boundary) return;
   event.preventDefault();
+  const toolbar = colorMenuHosts.value.find((host) => host.source === source)?.element
+    .parentElement;
   const buttons = [
-    ...(toolbarRef.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []),
+    ...(toolbar?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []),
   ];
   const index = buttons.findIndex((button) => button.dataset.format === kind);
   const target = event.shiftKey ? buttons[index] : buttons[index + 1];
   closeColorMenu();
-  void nextTick(() => target?.focus({ preventScroll: true }));
+  if (target) target.focus({ preventScroll: true });
+  else editorRef.value?.action((ctx) => ctx.get(editorViewCtx).focus());
 }
 
 function applyMenuColor(color: string | null) {
@@ -841,52 +1068,18 @@ function applyMenuColor(color: string | null) {
       if (view.state.selection.empty && session.marks)
         view.dispatch(view.state.tr.setStoredMarks(session.marks));
       textColors.apply(ctx, session.kind, color);
+      colorSelection.value = {
+        ...session,
+        marks: view.state.storedMarks,
+        clearable: textColors.active(ctx, session.kind),
+      };
+      if (color) colorDraft.value = color;
       refreshToolbar(ctx);
     });
     publishMarkdown(session.editor.action(serializeMarkdown()));
-    if (color) addRecentColor(color);
-    closeColorMenu();
-    void nextTick(() => {
-      if (canEdit(session.editor) && session.editor === editorRef.value)
-        session.editor.action((ctx) => ctx.get(editorViewCtx).focus());
-    });
   } catch (cause) {
     notification.show(errorMessage(cause, '颜色设置失败，请重新选择文字后重试'), 'error');
   }
-}
-
-function editTextColor(kind: TextColorKind) {
-  const editor = editorRef.value;
-  if (!canEdit(editor) || !editor.action((ctx) => textColors.enabled(ctx, kind))) return;
-  const key = rememberSelection(editor);
-  const version = readonlyVersion;
-  const initial = editor.action((ctx) => ({
-    color: textColors.selected(ctx, kind),
-    marks: ctx.get(editorViewCtx).state.storedMarks,
-  }));
-  interactions.hide();
-  modal.showModal(ModalType.INPUT_DIALOG, {
-    title: kind === 'textColor' ? '文字颜色' : '背景色',
-    tips: '输入 HEX 颜色，例如 #F00 或 #FF0000；清除颜色请使用工具栏的清除按钮',
-    defaultValue: initial.color ?? (kind === 'textColor' ? '#FF0000' : '#FFFF00'),
-    okText: '应用',
-    onOK: (value) => {
-      const color = normalizeHexColor(value);
-      if (!color) throw new Error('请输入 #RGB 或 #RRGGBB 格式的 HEX 颜色');
-      if (!canEdit(editor) || editor !== editorRef.value || version !== readonlyVersion)
-        throw new Error('当前文档不可编辑，请关闭弹窗后重试');
-      editor.action((ctx) => {
-        restoreSelection(ctx, key);
-        const view = ctx.get(editorViewCtx);
-        if (view.state.selection.empty && initial.marks)
-          view.dispatch(view.state.tr.setStoredMarks(initial.marks));
-        textColors.apply(ctx, kind, color);
-      });
-      publishMarkdown(editor.action(serializeMarkdown()));
-      bookmarks.delete(key);
-    },
-    onCancel: () => bookmarks.delete(key),
-  });
 }
 
 const { loading: initializing } = useEditor((root) => {
@@ -952,15 +1145,29 @@ const { loading: initializing } = useEditor((root) => {
       content.configure(ctx);
       textColors.configure(ctx);
       interactions.configure(ctx);
-      ctx.get(listenerCtx).markdownUpdated((_ctx, markdown, previous) => {
-        if (markdown !== previous) publishMarkdown(markdown);
-      });
+      links.configure(ctx);
+      tables.configure(ctx);
+      codeBlocks.configure(ctx);
+      ctx.update(trailingConfig.key, (config) => ({
+        ...config,
+        shouldAppend: (lastNode, state) => !props.readonly && config.shouldAppend(lastNode, state),
+      }));
+      ctx
+        .get(listenerCtx)
+        .markdownUpdated((_ctx, markdown, previous) => {
+          if (markdown !== previous) publishMarkdown(markdown);
+          refreshOutline();
+        })
+        .selectionUpdated((ctx, selection) => syncSelection(ctx, selection))
+        .focus((ctx) => syncSelection(ctx, undefined, true))
+        .blur((ctx) => syncSelection(ctx, undefined, false))
+        .destroy(() => editorStore.clearSelection(editorId));
     })
     .use(paste.plugins)
     .use(content.plugins)
     .use(commonmark)
+    .use(columnResizingPlugin)
     .use(gfm)
-    .use(prism)
     .use(history)
     .use(upload)
     .use(clipboard)
@@ -973,13 +1180,19 @@ const { loading: initializing } = useEditor((root) => {
     .use(mermaidExtension.plugins)
     .use(textColors.plugins)
     .use(interactions.plugins)
+    .use(links.plugins)
+    .use(tables.plugins)
+    .use(codeBlocks.plugins)
+    .use(trailing)
     .use(selectionPlugin);
 
   editorRef.value = editor;
   editor.onStatusChange((status) => {
     if (status === EditorStatus.Created && !disposed) {
       editor.action(refreshToolbar);
+      editor.action((ctx) => syncSelection(ctx));
       publishedMarkdown = editor.action(serializeMarkdown());
+      refreshOutline();
       ready.value = true;
       emit('ready', publishedMarkdown);
       pendingAttachments.splice(0).forEach((file) => insertAttachment(file));
@@ -1001,6 +1214,9 @@ watch(
   () => props.readonly,
   () => {
     readonlyVersion++;
+    links.hide();
+    tables.readonlyChanged();
+    codeBlocks.readonlyChanged();
     paste.readonlyChanged();
     imageImport.readonlyChanged();
     content.readonlyChanged();
@@ -1039,6 +1255,12 @@ watch(
 
 onBeforeUnmount(() => {
   disposed = true;
+  finishOutlineNavigation();
+  if (outlineFrame) cancelAnimationFrame(outlineFrame);
+  outlineScrollTarget?.removeEventListener('scroll', scheduleOutlineUpdate);
+  window.removeEventListener('resize', scheduleOutlineUpdate);
+  outlineScrollTarget = null;
+  editorStore.clearSelection(editorId);
   ready.value = false;
   closeColorMenu();
   if (editorRef.value?.status === EditorStatus.Created) {
@@ -1054,6 +1276,7 @@ onBeforeUnmount(() => {
   }
   pendingAttachments.length = 0;
   bookmarks.clear();
+  links.hide();
   content.destroy();
   paste.destroy();
   imageImport.destroy();
@@ -1115,6 +1338,7 @@ function setMarkdown(markdown: string) {
     content.replaceSavedDocument(ctx, document);
   });
   publishMarkdown(editor.action(serializeMarkdown()));
+  refreshOutline();
 }
 
 defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
@@ -1271,8 +1495,15 @@ defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
   --editor-code-value: #953800
   --editor-code-function: #8250df
   --editor-code-deleted: #b42318
+  display grid
+  grid-template-columns minmax(0, 1fr)
+  align-items start
+  column-gap var(--editor-outline-gap, 24px)
   position relative
+  width 100%
+  max-width var(--editor-layout-width, 1060px)
   min-height 100%
+  margin 0 auto
   color var(--editor-text)
   background var(--editor-bg)
 
@@ -1282,9 +1513,24 @@ defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
     --editor-code-function: #61afef
     --editor-code-deleted: #e06c75
 
+  &--outline
+    grid-template-columns var(--editor-outline-width, 176px) minmax(0, 1fr)
+
+  &--minimap
+    grid-template-columns minmax(0, 1fr) var(--editor-minimap-width, 112px)
+    max-width var(--editor-layout-width, 996px)
+
+  &--outline&--minimap
+    grid-template-columns var(--editor-outline-width, 176px) minmax(0, 1fr) var(--editor-minimap-width, 112px)
+    max-width var(--editor-layout-width, 1196px)
+
   .milkdown
     position relative
     font-family inherit
+
+  &__document
+    min-width 0
+    min-height 100%
 
   &__toolbar
     position sticky
@@ -1347,6 +1593,11 @@ defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
     &[data-format='undo'], &[data-format='redo']
       font-size 20px
 
+  &__color-controls
+    display flex
+    align-items center
+    gap 4px
+
   &__color-button
     gap 5px
 
@@ -1406,6 +1657,7 @@ defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
       font-weight 600
       line-height 1.4
       letter-spacing -.015em
+      scroll-margin-top 64px
 
     h1
       font-size 30px
@@ -1426,6 +1678,16 @@ defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
       color var(--editor-accent)
       text-decoration underline
       text-underline-offset 3px
+      cursor pointer
+
+      &:hover
+        text-decoration-thickness 2px
+        background var(--editor-selected)
+
+      &:focus-visible
+        outline 2px solid var(--editor-accent)
+        outline-offset 2px
+        border-radius 2px
 
     blockquote
       margin 16px 0
@@ -1541,16 +1803,21 @@ defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
       [hidden]
         display none
 
-    table
-      display block
+    .tableWrapper
       max-width 100%
       margin 16px 0
       overflow-x auto
+
+    table
+      width 100%
+      table-layout fixed
       border-collapse collapse
+
+    .column-resize-handle
+      background var(--editor-accent)
 
     td, th
       position relative
-      min-width 120px
       padding 8px 12px
       border 1px solid var(--editor-border)
       vertical-align top
@@ -1661,13 +1928,15 @@ defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
   &__image-controls
     position fixed
     z-index 30
+    box-sizing border-box
     display flex
     align-items center
-    flex-wrap wrap
-    gap 8px
-    width 320px
+    flex-wrap nowrap
+    gap 4px
+    width max-content
     max-width calc(100vw - 24px)
-    padding 8px
+    padding 6px
+    overflow-x auto
     border 1px solid var(--editor-border)
     border-radius 6px
     background var(--editor-panel)
@@ -1675,10 +1944,12 @@ defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
     color var(--editor-text)
     font-size 12px
     line-height 1.5
+    white-space nowrap
 
     input
-      width 76px
-      height 32px
+      box-sizing border-box
+      width 64px
+      height 28px
       padding 0 6px
       border 1px solid var(--editor-border)
       border-radius 4px
@@ -1690,13 +1961,17 @@ defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
         border-color var(--color-red)
 
     button
-      height 32px
-      padding 0 8px
-      border 1px solid var(--editor-border)
+      display inline-flex
+      flex-shrink 0
+      align-items center
+      justify-content center
+      width 28px
+      height 28px
+      padding 6px
+      border 0
       border-radius 4px
       color var(--editor-text)
-      background var(--editor-hover)
-      white-space nowrap
+      background transparent
       cursor pointer
 
       &:hover:not(:disabled)
@@ -1716,27 +1991,38 @@ defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
 
   &__image-label
     display inline-flex
+    flex-shrink 0
     align-items center
-    gap 6px
+    gap 4px
 
   &__image-alignment
     display flex
-    flex-basis 100%
-    gap 4px
-    padding-top 6px
-    border-top 1px solid var(--editor-border)
+    flex-shrink 0
+    align-items center
+    gap 2px
 
-    button
-      flex 1
+    button[aria-pressed='true']
+      color var(--editor-accent)
+      background var(--editor-selected)
 
-      &[aria-pressed='true']
-        color var(--editor-accent)
-        background var(--editor-selected)
-        border-color var(--editor-accent)
+  &__image-separator
+    flex-shrink 0
+    width 1px
+    height 18px
+    background var(--editor-border)
 
   &__image-validation
-    flex-basis 100%
+    position fixed
+    z-index 31
+    box-sizing border-box
+    width max-content
+    max-width calc(100vw - 24px)
+    padding 4px 8px
+    border 1px solid var(--color-red)
+    border-radius 4px
+    background var(--editor-panel)
     color var(--color-red)
+    font-size 12px
     line-height 1.5
 
   &__image-error
@@ -1790,6 +2076,111 @@ defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
 
     &[data-show='false'], &[hidden]
       display none
+
+  &__link-popover
+    position absolute
+    z-index 20
+    max-width calc(100vw - 32px)
+    padding 6px
+    border 1px solid var(--editor-border)
+    border-radius 8px
+    background var(--editor-panel)
+    box-shadow var(--shadow-medium, 0 4px 24px #0002)
+    color var(--editor-text)
+    font-family inherit
+    font-size 13px
+
+    &[data-show='false']
+      display none
+
+    .link-preview, .link-edit
+      display flex
+      align-items center
+      gap 4px
+      min-width 0
+
+    .link-display
+      display block
+      min-width 0
+      max-width 320px
+      padding 6px 8px
+      overflow hidden
+      text-overflow ellipsis
+      white-space nowrap
+      border-radius 6px
+      color var(--editor-accent)
+      text-decoration none
+      cursor pointer
+
+      &:hover
+        background var(--editor-hover)
+        text-decoration underline
+
+    .button
+      display inline-flex
+      flex-shrink 0
+
+      button
+        display inline-flex
+        align-items center
+        justify-content center
+        min-width 32px
+        height 32px
+        padding 6px 8px
+        border 0
+        border-radius 6px
+        background transparent
+        color var(--editor-secondary)
+        font inherit
+        cursor pointer
+
+        &:hover
+          background var(--editor-hover)
+          color var(--editor-text)
+
+        &:active
+          background var(--editor-selected)
+
+      svg
+        width 16px
+        height 16px
+        fill currentColor
+        pointer-events none
+
+    button:focus-visible, .link-display:focus-visible
+      outline 2px solid var(--editor-accent)
+      outline-offset 1px
+
+    .input-area
+      width 280px
+      min-width 0
+      max-width calc(100vw - 112px)
+      height 32px
+      padding 6px 9px
+      border 1px solid var(--editor-border)
+      border-radius 6px
+      outline none
+      background var(--editor-bg)
+      color var(--editor-text)
+      font inherit
+
+      &::placeholder
+        color var(--editor-muted)
+
+      &:focus
+        border-color var(--editor-accent)
+        box-shadow 0 0 0 1px var(--editor-accent)
+
+      &[aria-invalid='true']
+        border-color var(--color-red)
+
+    .confirm button
+      color var(--editor-accent)
+      background var(--editor-selected)
+
+    &[data-readonly='true']
+      .link-edit-button, .link-remove-button
+        display none
 
   &__format
     display flex
@@ -2060,8 +2451,7 @@ defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
   padding 6px
   border-top 1px solid var(--color-border-secondary)
 
-.milkdown-editor__color-clear,
-.milkdown-editor__color-apply
+.milkdown-editor__color-clear
   display flex
   align-items center
   gap 8px
@@ -2092,12 +2482,6 @@ defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
 .milkdown-editor__color-clear
   flex 1
 
-.milkdown-editor__color-apply
-  justify-content center
-  min-width 48px
-  background var(--color-accent-tint)
-  color var(--color-accent)
-
 @keyframes milkdown-toolbar-spin
   to
     transform rotate(360deg)
@@ -2105,4 +2489,9 @@ defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
 @media (prefers-reduced-motion: reduce)
   .milkdown-editor__uploading
     animation none
+
+@media (max-width: 768px)
+  .milkdown-editor
+    grid-template-columns minmax(0, 1fr)
+    column-gap 0
 </style>
