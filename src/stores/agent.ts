@@ -4,6 +4,7 @@ import { authUser } from '@/service/auth-session';
 import {
   beginAITurn,
   createAIConversation,
+  deleteAIConversation,
   finishAITurn,
   getAIConversation,
   listAIConversations,
@@ -107,6 +108,7 @@ export const useAgentStore = defineStore('agent', () => {
     const current = epoch;
     const key = `list:${fileKey}`;
     const info = listState(fileKey);
+    const version = versions.get(key) ?? 0;
     if (older && (!info.nextCursor || info.loading)) return;
     reads.get(key)?.abort();
     const controller = new AbortController();
@@ -119,7 +121,8 @@ export const useAgentStore = defineStore('agent', () => {
         older ? info.nextCursor : '',
         controller.signal
       );
-      if (epoch !== current || controller.signal.aborted) return;
+      if (epoch !== current || controller.signal.aborted || (versions.get(key) ?? 0) !== version)
+        return;
       mergeConversations(fileKey, page.sessions);
       info.nextCursor = page.nextCursor;
       info.loaded = true;
@@ -171,6 +174,36 @@ export const useAgentStore = defineStore('agent', () => {
       });
     creates.set(fileKey, request);
     return request;
+  }
+
+  async function removeConversation(fileKey: string, id: string) {
+    if (!fileKey || !authUser.value) throw new Error('请先登录并打开文档');
+    if (
+      messages(fileKey, id).some((message) => !!message.persistence) ||
+      [...pending.values()].some((entry) => entry.fileKey === fileKey && entry.sessionId === id)
+    )
+      throw new Error('此对话有未保存的回复，请先重试保存后再删除');
+    const current = epoch;
+    const controller = new AbortController();
+    writes.add(controller);
+    try {
+      await deleteAIConversation(fileKey, id, controller.signal);
+      if (epoch !== current) throw new Error('账号已切换');
+      const key = cacheKey(fileKey, id);
+      changed(key);
+      changed(`list:${fileKey}`);
+      reads.get(key)?.abort();
+      delete sessions[key];
+      delete states[key];
+      delete drafts[key];
+      conversations[fileKey] = (conversations[fileKey] ?? []).filter(
+        (session) => session.id !== id
+      );
+      if (selectedSessions[fileKey] === id)
+        selectedSessions[fileKey] = conversations[fileKey]?.[0]?.id ?? '';
+    } finally {
+      writes.delete(controller);
+    }
   }
 
   function merge(key: string, incoming: ChatMessage[], completedTurn?: string) {
@@ -365,6 +398,7 @@ export const useAgentStore = defineStore('agent', () => {
     listState,
     loadConversations,
     createConversation,
+    removeConversation,
     selectConversation,
     load,
     begin,

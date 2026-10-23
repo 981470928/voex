@@ -9,18 +9,16 @@
     >
       <ul class="editor-outline__list">
         <li v-for="item in displayItems" :key="item.key" class="editor-outline__item">
-          <button
-            type="button"
+          <div
             class="editor-outline__link"
             :class="{ 'editor-outline__link--active': item.key === activeKey }"
             :style="{ paddingLeft: `${12 + item.depth * 14}px` }"
             :title="item.text"
             :aria-current="item.key === activeKey ? 'location' : undefined"
-            :disabled="navigating"
             @click="$emit('select', item)"
           >
             {{ item.text }}
-          </button>
+          </div>
         </li>
       </ul>
     </nav>
@@ -87,47 +85,22 @@ const displayItems = computed(() => {
 
   &__link
     position relative
-    display block
     width 100%
-    min-width 0
     padding 6px 8px
-    border 0
     border-radius 6px
-    background transparent
     color var(--color-text-secondary)
-    font-family inherit
     font-size 12px
     line-height 1.5
     text-align left
     overflow-wrap anywhere
     cursor pointer
     transition background .15s, color .15s
-
-    &:hover:not(:disabled)
+    &:hover
       background var(--color-bg-translucent)
-      color var(--color-text-primary)
-
-    &:disabled
-      cursor progress
-
-    &:focus-visible
-      outline 2px solid var(--color-accent)
-      outline-offset -2px
 
     &--active
-      background var(--color-accent-tint)
+      background var(--color-accent-tint)!important
       color var(--color-accent)
-      font-weight 600
-
-      &::before
-        content ''
-        position absolute
-        top 7px
-        bottom 7px
-        left 0
-        width 2px
-        border-radius 1px
-        background var(--color-accent)
 
   &__empty
     margin 0

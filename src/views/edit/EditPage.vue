@@ -2,7 +2,7 @@
   <div
     ref="shortcutScope"
     class="edit-page"
-    :class="{ 'edit-page--mobile': isMobile }"
+    :class="{ 'edit-page--mobile': isMobile, 'edit-page--zen': zenMode }"
     @keydown.capture="handleEditorActivity"
     @pointerdown.capture="handleEditorActivity"
     @input.capture="handleEditorActivity"
@@ -13,104 +13,133 @@
     <nav
       class="edit-page__rail"
       :class="{ 'edit-page__rail--loading': !workspaceReady }"
-      :inert="!workspaceReady"
+      :inert="!workspaceReady || zenTransitioning"
       :aria-hidden="!workspaceReady"
       aria-label="编辑页操作"
     >
+      <div
+        v-show="!zenMode"
+        class="edit-page__rail-actions"
+        :inert="zenMode"
+        :aria-hidden="zenMode"
+      >
+        <button
+          ref="aiPanelButton"
+          type="button"
+          class="edit-page__icon-button"
+          title="AI（A）"
+          aria-label="AI"
+          aria-keyshortcuts="A"
+          :aria-expanded="activePanel === 'ai'"
+          aria-controls="editor-side-panel"
+          :disabled="!documentReady"
+          @click="togglePanel('ai', $event)"
+        >
+          <SvgIcon name="ai" :size="20" />
+        </button>
+        <button
+          ref="fileListButton"
+          type="button"
+          class="edit-page__icon-button"
+          title="项目列表（L）"
+          aria-label="项目列表"
+          aria-keyshortcuts="L"
+          :aria-expanded="activePanel === 'projects'"
+          aria-controls="editor-side-panel"
+          @click="togglePanel('projects', $event)"
+        >
+          <SvgIcon name="folder" :size="20" />
+        </button>
+        <button
+          ref="zenEntryButton"
+          type="button"
+          class="edit-page__icon-button"
+          title="进入 Zen 模式（Z）"
+          aria-label="进入 Zen 模式"
+          aria-keyshortcuts="Z"
+          :disabled="!documentReady || zenTransitioning || userConfig.loading"
+          @click="toggleZenMode"
+        >
+          <SvgIcon name="zen" :size="20" />
+        </button>
+        <button
+          type="button"
+          class="edit-page__icon-button"
+          title="导出"
+          aria-label="导出"
+          :disabled="!documentReady || busy"
+          @click="handleExportDocument"
+        >
+          <SvgIcon name="download" :size="18" />
+        </button>
+        <button
+          type="button"
+          class="edit-page__icon-button"
+          :title="canShare ? '分享' : '分享（需要项目分享权限）'"
+          aria-label="分享"
+          :disabled="!documentReady || !canShare || busy"
+          @click="showShare = true"
+        >
+          <SvgIcon name="share" :size="18" />
+        </button>
+        <button
+          ref="attachmentListButton"
+          type="button"
+          class="edit-page__icon-button"
+          title="附件（F）"
+          aria-label="附件"
+          aria-keyshortcuts="F"
+          :aria-expanded="activePanel === 'attachments'"
+          aria-controls="editor-side-panel"
+          :disabled="!documentReady"
+          @click="togglePanel('attachments', $event)"
+        >
+          <SvgIcon name="attachment" :size="20" />
+        </button>
+        <DownloadQueue variant="popover" />
+        <EditorSettings />
+        <button
+          v-if="isDev"
+          ref="debugToolButton"
+          type="button"
+          class="edit-page__icon-button"
+          :title="exportingSchema ? '正在读取已保存的文档数据' : 'debugTool'"
+          aria-label="debugTool"
+          aria-haspopup="menu"
+          :aria-expanded="debugMenuOpen"
+          :aria-busy="exportingSchema"
+          :disabled="exportingSchema || !documentReady"
+          @click="toggleDebugMenu"
+          @keydown.down.prevent="toggleDebugMenu"
+        >
+          <SvgIcon name="bug" :size="18" />
+        </button>
+        <RouterLink
+          :to="desktopLocation(undefined, undefined, projectTree?.project.team_key)"
+          class="edit-page__icon-button"
+          title="返回主页"
+          aria-label="返回主页"
+        >
+          <SvgIcon name="home" :size="18" />
+        </RouterLink>
+      </div>
       <button
-        ref="aiPanelButton"
+        v-show="zenMode"
+        ref="zenExitButton"
         type="button"
         class="edit-page__icon-button"
-        title="AI（A）"
-        aria-label="AI"
-        aria-keyshortcuts="A"
-        :aria-expanded="activePanel === 'ai'"
-        aria-controls="editor-side-panel"
-        :disabled="!documentReady"
-        @click="togglePanel('ai', $event)"
+        title="退出 Zen 模式（Z）"
+        aria-label="退出 Zen 模式"
+        aria-keyshortcuts="Z"
+        :disabled="zenTransitioning"
+        @click="toggleZenMode"
       >
-        <SvgIcon name="ai" :size="20" />
+        <SvgIcon name="close" :size="18" />
       </button>
-      <button
-        ref="fileListButton"
-        type="button"
-        class="edit-page__icon-button"
-        title="项目列表（L）"
-        aria-label="项目列表"
-        aria-keyshortcuts="L"
-        :aria-expanded="activePanel === 'projects'"
-        aria-controls="editor-side-panel"
-        @click="togglePanel('projects', $event)"
-      >
-        <SvgIcon name="folder" :size="20" />
-      </button>
-      <button
-        type="button"
-        class="edit-page__icon-button"
-        title="导出"
-        aria-label="导出"
-        :disabled="!documentReady || busy"
-        @click="handleExportDocument"
-      >
-        <SvgIcon name="download" :size="18" />
-      </button>
-      <button
-        type="button"
-        class="edit-page__icon-button"
-        :title="canShare ? '分享' : '分享（需要项目分享权限）'"
-        aria-label="分享"
-        :disabled="!documentReady || !canShare || busy"
-        @click="showShare = true"
-      >
-        <SvgIcon name="share" :size="18" />
-      </button>
-      <button
-        ref="attachmentListButton"
-        type="button"
-        class="edit-page__icon-button"
-        title="附件（F）"
-        aria-label="附件"
-        aria-keyshortcuts="F"
-        :aria-expanded="activePanel === 'attachments'"
-        aria-controls="editor-side-panel"
-        :disabled="!documentReady"
-        @click="togglePanel('attachments', $event)"
-      >
-        <SvgIcon name="attachment" :size="20" />
-      </button>
-      <DownloadQueue variant="popover" />
-      <EditorSettings />
-      <button
-        v-if="isDev"
-        ref="debugToolButton"
-        type="button"
-        class="edit-page__icon-button"
-        :title="exportingSchema ? '正在读取已保存的文档数据' : 'debugTool'"
-        aria-label="debugTool"
-        aria-haspopup="menu"
-        :aria-expanded="debugMenuOpen"
-        :aria-busy="exportingSchema"
-        :disabled="exportingSchema || !documentReady"
-        @click="toggleDebugMenu"
-        @keydown.down.prevent="toggleDebugMenu"
-      >
-        <SvgIcon name="bug" :size="18" />
-      </button>
-      <RouterLink
-        :to="desktopLocation(undefined, undefined, projectTree?.project.team_key)"
-        class="edit-page__icon-button"
-        title="返回主页"
-        aria-label="返回主页"
-      >
-        <SvgIcon name="home" :size="18" />
-      </RouterLink>
     </nav>
 
     <!-- Center: Editor -->
-    <main
-      class="edit-page__center"
-      :class="{ 'edit-page__center--without-outline': !userConfig.showOutline }"
-    >
+    <main class="edit-page__center" :inert="zenTransitioning">
       <div class="edit-page__header">
         <div class="edit-page__heading">
           <span
@@ -189,9 +218,10 @@
               :on-preview-attachment="handlePreviewAttachment"
               :readonly="!documentReady || !canWrite || aiBusy"
               :loading="!documentReady"
-              :show-toolbar="workspaceReady && !isMobile"
-              :show-outline="userConfig.showOutline"
-              :show-minimap="userConfig.showMinimap"
+              :show-toolbar="workspaceReady && !isMobile && !zenMode"
+              floating-navigation
+              :show-outline="showOutline"
+              :show-minimap="userConfig.showMinimap && !zenMode"
               @ready="displayedDocument.onReady"
               @load-error="displayedDocument.onError"
               @change="displayedDocument.onChange"
@@ -346,6 +376,7 @@ import { useDialog } from '@/composables/useDialog';
 import { ModalType } from '@/stores/modal';
 import { MessageType } from '@/constant/status';
 import { useNotificationStore } from '@/stores/notification';
+import { useMessageBox } from '@/composables/useMessageBox';
 import { errorMessage } from '@/utils/error';
 import type { ApiError } from '@/service/api/index';
 import {
@@ -355,6 +386,21 @@ import {
 } from '@/plugins/context-menu';
 
 const userConfig = useUserConfigStore();
+const zenMessages = useMessageBox();
+const zenMode = ref(false);
+const zenTransitioning = ref(false);
+const zenEntryButton = ref<HTMLButtonElement | null>(null);
+const zenExitButton = ref<HTMLButtonElement | null>(null);
+const showOutline = computed(() => userConfig.showOutline && !zenMode.value);
+let zenAnimations: Animation[] = [];
+let zenDisposed = false;
+let zenFullscreenOwned = false;
+onBeforeUnmount(() => {
+  zenDisposed = true;
+  zenAnimations.forEach((animation) => animation.cancel());
+  if (zenFullscreenOwned && document.fullscreenElement === document.documentElement)
+    void document.exitFullscreen().catch(() => undefined);
+});
 const isDev = import.meta.env.DEV;
 const debugToolButton = ref<HTMLButtonElement | null>(null);
 const debugMenuOpen = ref(false);
@@ -403,8 +449,9 @@ async function togglePanel(panel: EditorPanel, event: MouseEvent) {
 async function openPanel(panel: EditorPanel, trigger: HTMLButtonElement | null) {
   if (activePanel.value === panel || !trigger || trigger.disabled) return;
   if (!documentReady.value && panel !== 'projects') return;
+  const focusTarget = zenMode.value ? zenExitButton.value : trigger;
   panelTrigger.value = trigger;
-  trigger.focus({ preventScroll: true });
+  focusTarget?.focus({ preventScroll: true });
   downloadStore.expanded = false;
   activePanel.value = panel;
   await nextTick();
@@ -419,14 +466,104 @@ async function handlePanelOpened() {
     documentReady.value &&
     activePanel.value &&
     !downloadStore.expanded &&
-    document.activeElement === panelTrigger.value
+    document.activeElement === (zenMode.value ? zenExitButton.value : panelTrigger.value)
   )
     sidePanel.value?.focus({ preventScroll: true });
 }
 
 function closePanel() {
   activePanel.value = null;
-  if (!isMobile) void nextTick(() => panelTrigger.value?.focus({ preventScroll: true }));
+  if (!isMobile)
+    void nextTick(() =>
+      (zenMode.value ? zenExitButton.value : panelTrigger.value)?.focus({ preventScroll: true })
+    );
+}
+
+async function animateZenSurfaces(entering: boolean) {
+  zenAnimations.forEach((animation) => animation.cancel());
+  const surfaces = shortcutScope.value?.querySelectorAll<HTMLElement>(
+    ':scope > .edit-page__rail, :scope > .edit-page__center'
+  );
+  zenAnimations = [...(surfaces ?? [])].map((element) =>
+    element.animate(
+      entering
+        ? [
+            { opacity: 0, transform: 'translateY(4px)' },
+            { opacity: 1, transform: 'translateY(0)' },
+          ]
+        : [
+            { opacity: 1, transform: 'translateY(0)' },
+            { opacity: 0, transform: 'translateY(-4px)' },
+          ],
+      { duration: entering ? 200 : 100, easing: 'cubic-bezier(.2, .7, .2, 1)', fill: 'forwards' }
+    )
+  );
+  await Promise.all(zenAnimations.map((animation) => animation.finished.catch(() => undefined)));
+}
+
+async function syncZenFullscreen(entering: boolean) {
+  try {
+    if (!entering) {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      zenFullscreenOwned = false;
+    } else if (userConfig.zenFullscreen && !document.fullscreenElement) {
+      if (!document.fullscreenEnabled || !document.documentElement.requestFullscreen) {
+        zenMessages.info('当前浏览器不支持全屏，将继续进入 Zen 模式。', { key: 'fullscreen' });
+        return;
+      }
+      // Keep body portals (drawers, dialogs, notifications) inside the fullscreen element.
+      await document.documentElement.requestFullscreen();
+      zenFullscreenOwned = true;
+      if (zenDisposed && document.fullscreenElement === document.documentElement) {
+        await document.exitFullscreen();
+        zenFullscreenOwned = false;
+      }
+    }
+  } catch {
+    if (!zenDisposed)
+      zenMessages.info(
+        entering ? '未能进入全屏，将继续进入 Zen 模式。' : '未能退出全屏，请按 Esc 退出。',
+        {
+          key: 'fullscreen',
+        }
+      );
+  }
+}
+
+async function toggleZenMode() {
+  if (zenTransitioning.value || (!zenMode.value && (!documentReady.value || userConfig.loading)))
+    return;
+  const entering = !zenMode.value;
+  zenTransitioning.value = true;
+  // Request fullscreen before the first await so the click's user activation is retained.
+  const fullscreenTask = syncZenFullscreen(entering);
+  try {
+    await Promise.all([
+      fullscreenTask,
+      reducedMotion.value ? Promise.resolve() : animateZenSurfaces(false),
+    ]);
+    if (zenDisposed) return;
+    // Close once on entry; the normal panel shortcuts remain available in Zen mode.
+    if (entering) {
+      activePanel.value = null;
+      downloadStore.expanded = false;
+      debugMenuOpen.value = false;
+    }
+    const scroller = shortcutScope.value?.querySelector<HTMLElement>('.edit-page__body');
+    const scrollTop = scroller?.scrollTop ?? 0;
+    zenMode.value = entering;
+    await nextTick();
+    if (scroller) scroller.scrollTop = scrollTop;
+    if (!reducedMotion.value) await animateZenSurfaces(true);
+  } finally {
+    zenAnimations.forEach((animation) => animation.cancel());
+    zenAnimations = [];
+    zenTransitioning.value = false;
+    if (!zenDisposed) {
+      await nextTick();
+      (zenMode.value ? zenExitButton.value : zenEntryButton.value)?.focus({ preventScroll: true });
+    }
+  }
 }
 
 function handlePanelEscape(event: KeyboardEvent) {
@@ -551,6 +688,12 @@ useKeyboardShortcuts({
       run: () => void openPanel('ai', aiPanelButton.value),
     },
     { key: 'l', run: () => void openPanel('projects', fileListButton.value) },
+    {
+      key: 'z',
+      enabled: () =>
+        !zenTransitioning.value && (zenMode.value || (documentReady.value && !userConfig.loading)),
+      run: () => void toggleZenMode(),
+    },
     {
       key: 'f',
       enabled: () => documentReady.value,
@@ -805,6 +948,9 @@ async function handleExportDocument() {
   background var(--color-bg-primary)
 
   &__rail
+    position fixed
+    z-index 20
+    inset 0 auto 0 0
     display flex
     flex-direction column
     align-items center
@@ -821,6 +967,14 @@ async function handleExportDocument() {
       visibility hidden
       pointer-events none
 
+  &__rail-actions
+    display flex
+    flex-direction column
+    align-items center
+    flex-shrink 0
+    width 100%
+    gap 12px
+
   &__panel
     --edit-panel-width: 320px
     display flex
@@ -836,6 +990,18 @@ async function handleExportDocument() {
 
     &--ai
       --edit-panel-width: 380px
+
+    &:not(.edit-page__panel--mobile)
+      --edit-panel-width: unquote('min(320px, calc(100vw - 80px))')
+      position absolute
+      z-index 20
+      top 0
+      right 0
+      bottom 0
+      box-shadow var(--shadow-medium)
+
+      &.edit-page__panel--ai
+        --edit-panel-width: unquote('min(380px, calc(100vw - 80px))')
 
     &--loading
       visibility hidden
@@ -875,45 +1041,33 @@ async function handleExportDocument() {
   &__loading
     position absolute
     inset 0
-    width 100%
-    max-width var(--editor-layout-width)
+    width calc(100% - var(--edit-canvas-inset) * 2)
+    max-width var(--edit-content-width)
     margin 0 auto
     padding-top 45px
-    padding-left var(--editor-outline-space)
-    padding-right var(--editor-minimap-space)
     overflow hidden
 
   /* ---------- Center: editor ---------- */
   &__center
     --edit-content-width: 860px
     --edit-content-gutter: 52px
+    --edit-canvas-inset: 64px
     --editor-outline-width: 176px
     --editor-outline-gap: 24px
-    --editor-outline-space: calc(var(--editor-outline-width) + var(--editor-outline-gap))
     --editor-minimap-width: 112px
-    --editor-minimap-space: 0px
-    --editor-layout-width: calc(var(--edit-content-width) + var(--editor-outline-space) + var(--editor-minimap-space))
     flex 1
     display flex
     flex-direction column
     min-width 0
 
-    &--without-outline
-      --editor-outline-space: 0px
-
-    &:has(.milkdown-editor--minimap)
-      --editor-minimap-space: calc(var(--editor-minimap-width) + var(--editor-outline-gap))
-
   &__header
     display flex
     align-items center
     gap 12px
-    width 100%
-    max-width var(--editor-layout-width)
+    width calc(100% - var(--edit-canvas-inset) * 2)
+    max-width var(--edit-content-width)
     margin 0 auto
     padding 0 var(--edit-content-gutter)
-    padding-left calc(var(--editor-outline-space) + var(--edit-content-gutter))
-    padding-right calc(var(--edit-content-gutter) + var(--editor-minimap-space))
     flex-shrink 0
     text-align left
     height 56px
@@ -1095,18 +1249,6 @@ async function handleExportDocument() {
   @media (max-width: 960px)
     &__center
       --edit-content-gutter: 24px
-
-    &__panel:not(.edit-page__panel--mobile)
-      --edit-panel-width: unquote('min(320px, calc(100vw - 80px))')
-      position absolute
-      z-index 20
-      top 0
-      right 0
-      bottom 0
-      box-shadow var(--shadow-medium)
-
-      &.edit-page__panel--ai
-        --edit-panel-width: unquote('min(380px, calc(100vw - 80px))')
 
     &__header
       gap 8px

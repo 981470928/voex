@@ -4,17 +4,19 @@
     class="milkdown-editor"
     :class="{
       'milkdown-editor--readonly': readonly,
+      'milkdown-editor--floating-navigation': floatingNavigation,
       'milkdown-editor--outline': showOutline,
       'milkdown-editor--minimap': minimapAvailable && supportsMinimap && showMinimap,
     }"
   >
-    <EditorOutline
-      v-if="showOutline"
-      :items="outlineItems"
-      :active-key="activeOutlineKey"
-      :navigating="outlineNavigating"
-      @select="scrollToOutline"
-    />
+    <div v-if="showOutline" class="milkdown-editor__outline-anchor">
+      <EditorOutline
+        :items="outlineItems"
+        :active-key="activeOutlineKey"
+        :navigating="outlineNavigating"
+        @select="scrollToOutline"
+      />
+    </div>
     <div class="milkdown-editor__document">
       <div
         v-if="(!readonly || loading) && showToolbar"
@@ -179,16 +181,17 @@
       </Teleport>
       <Milkdown :inert="loading" :aria-hidden="loading" />
     </div>
-    <DocumentMinimap
-      v-if="supportsMinimap && showMinimap"
-      :source-root="editorRoot"
-      :min-source-width="showOutline ? 1000 : 800"
-      :active="ready && !loading"
-      content-selector=".milkdown-editor__content"
-      :placeholders="editorMinimapPlaceholders"
-      :ignore-selectors="editorMinimapIgnoreSelectors"
-      @availability="minimapAvailable = $event"
-    />
+    <div v-if="supportsMinimap && showMinimap" class="milkdown-editor__minimap-anchor">
+      <DocumentMinimap
+        :source-root="editorRoot"
+        :min-source-width="floatingNavigation ? 800 : showOutline ? 1000 : 800"
+        :active="ready && !loading"
+        content-selector=".milkdown-editor__content"
+        :placeholders="editorMinimapPlaceholders"
+        :ignore-selectors="editorMinimapIgnoreSelectors"
+        @availability="minimapAvailable = $event"
+      />
+    </div>
   </section>
 </template>
 
@@ -283,6 +286,7 @@ const props = withDefaults(
     showToolbar?: boolean;
     showOutline?: boolean;
     showMinimap?: boolean;
+    floatingNavigation?: boolean;
   }>(),
   {
     defaultValue: '',
@@ -298,6 +302,7 @@ const props = withDefaults(
     showToolbar: true,
     showOutline: true,
     showMinimap: true,
+    floatingNavigation: false,
   }
 );
 
@@ -1527,6 +1532,37 @@ defineExpose({ getMarkdown, insertAttachment, normalizeMarkdown, setMarkdown });
   .milkdown
     position relative
     font-family inherit
+
+  &__outline-anchor, &__minimap-anchor
+    display contents
+
+  &--floating-navigation
+    &.milkdown-editor
+      display block
+      width calc(100% - var(--edit-canvas-inset, 0px) * 2)
+      max-width var(--edit-content-width, 860px)
+
+    .milkdown-editor__outline-anchor, .milkdown-editor__minimap-anchor
+      position absolute
+      top 0
+      bottom 0
+      display block
+
+    .milkdown-editor__outline-anchor
+      right calc(100% + var(--editor-outline-gap, 24px))
+      width var(--editor-outline-width, 176px)
+
+    .milkdown-editor__minimap-anchor
+      left calc(100% + var(--editor-outline-gap, 24px))
+      width var(--editor-minimap-width, 112px)
+
+    @media (max-width: 1387px)
+      .milkdown-editor__outline-anchor
+        display none
+
+    @media (max-width: 1199px)
+      .milkdown-editor__minimap-anchor
+        display none
 
   &__document
     min-width 0

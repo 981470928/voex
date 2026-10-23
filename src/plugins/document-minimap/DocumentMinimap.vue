@@ -213,7 +213,6 @@ onBeforeUnmount(() => {
   position sticky
   top 8px
   align-self start
-  box-sizing border-box
   width var(--editor-minimap-width, 112px)
   min-width 0
   color var(--editor-text)
@@ -224,11 +223,9 @@ onBeforeUnmount(() => {
 
   &__track
     position relative
-    box-sizing border-box
     width 100%
     min-height 0
     overflow hidden
-    border-left 1px solid var(--editor-border)
     border-radius 4px
 
   :deep(.dom-minimap)

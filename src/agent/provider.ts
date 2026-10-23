@@ -17,6 +17,7 @@ function openAIMessages(system: string, history: ModelMessage[]) {
       return {
         role: 'assistant',
         content: message.text || null,
+        ...(message.reasoning !== undefined && { reasoning_content: message.reasoning }),
         ...(message.calls.length && {
           tool_calls: message.calls.map((call) => ({
             id: call.id,
@@ -88,12 +89,15 @@ export async function completeModel(
   if (data.error) throw new Error('模型服务返回错误，请检查模型配置');
   const calls: ToolCall[] = [];
   let text = '';
+  let reasoning = '';
   if (anthropic) {
     if (data.stop_reason === 'max_tokens')
       throw new Error('模型输出被截断，请增加输出上限或缩小修改范围');
     if (!Array.isArray(data.content)) throw new Error('Claude Messages 响应缺少 content');
     for (const value of data.content) {
       const block = record(value);
+      if (block.type === 'thinking' && typeof block.thinking === 'string')
+        reasoning += (reasoning ? '\n\n' : '') + block.thinking;
       if (block.type === 'text' && typeof block.text === 'string') text += block.text;
       if (block.type === 'tool_use') {
         if (typeof block.id !== 'string' || typeof block.name !== 'string')
@@ -101,7 +105,7 @@ export async function completeModel(
         calls.push({ id: block.id, name: block.name, arguments: JSON.stringify(block.input) });
       }
     }
-    return { role: 'assistant', text, calls, blocks: data.content };
+    return { role: 'assistant', text, reasoning, calls, blocks: data.content };
   }
   if (!Array.isArray(data.choices) || !data.choices.length)
     throw new Error('OpenAI Chat 响应缺少 choices');
@@ -109,6 +113,8 @@ export async function completeModel(
   if (choice.finish_reason === 'length')
     throw new Error('模型输出被截断，请增加输出上限或缩小修改范围');
   const message = record(choice.message);
+  const reasoningContent =
+    typeof message.reasoning_content === 'string' ? message.reasoning_content : undefined;
   if (typeof message.content === 'string') text = message.content;
   if (Array.isArray(message.tool_calls)) {
     for (const value of message.tool_calls) {
@@ -124,5 +130,5 @@ export async function completeModel(
     }
   }
   if (typeof message.refusal === 'string' && !text) text = message.refusal;
-  return { role: 'assistant', text, calls };
+  return { role: 'assistant', text, reasoning: reasoningContent, calls };
 }

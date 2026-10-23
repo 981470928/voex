@@ -51,6 +51,7 @@ export interface ChatMessage {
   sequence: number;
   role: 'user' | 'assistant';
   text: string;
+  reasoning?: string;
   activity?: string[];
   review?: ReviewSummary;
   error?: string;
@@ -92,7 +93,7 @@ export interface ToolCall {
 
 export type ModelMessage =
   | { role: 'user'; text: string }
-  | { role: 'assistant'; text: string; calls: ToolCall[]; blocks?: unknown[] }
+  | { role: 'assistant'; text: string; reasoning?: string; calls: ToolCall[]; blocks?: unknown[] }
   | { role: 'tool'; callId: string; text: string; isError: boolean };
 
 export interface ToolSchema {

@@ -33,7 +33,6 @@
             <SvgIcon name="close" :size="16" />
           </button>
         </header>
-        <p class="editor-settings__description">对当前账号的所有文档生效</p>
         <div class="editor-settings__options" :aria-busy="settings.loading || settings.saving">
           <button
             v-for="option in options"
@@ -43,23 +42,10 @@
             class="editor-settings__switch"
             :aria-checked="option.checked"
             :aria-describedby="settingsError ? errorId : statusId"
-            :disabled="!settings.canChange"
             @click="setPreference(option.key, !option.checked, $event)"
           >
             <span>{{ option.label }}</span>
             <span class="editor-settings__track" aria-hidden="true" />
-          </button>
-        </div>
-        <p :id="statusId" class="editor-settings__status" role="status">{{ status }}</p>
-        <div v-if="settingsError" :id="errorId" class="editor-settings__error" role="alert">
-          <p>{{ settingsError }}</p>
-          <button
-            type="button"
-            class="editor-settings__retry"
-            :disabled="settings.loading || settings.saving"
-            @click="retry"
-          >
-            {{ settings.loadError ? '重新读取' : '重试保存' }}
           </button>
         </div>
       </section>
@@ -82,19 +68,13 @@ const errorId = id + '-settings-error';
 const options = computed(() => [
   { key: 'editorOutlineVisible' as const, label: '显示目录', checked: settings.showOutline },
   { key: 'editorMinimapVisible' as const, label: '显示小地图', checked: settings.showMinimap },
+  {
+    key: 'editorZenFullscreen' as const,
+    label: 'Zen 模式自动全屏',
+    checked: settings.zenFullscreen,
+  },
 ]);
 const settingsError = computed(() => settings.loadError || settings.saveError);
-const status = computed(() =>
-  settings.loading
-    ? '正在读取设置…'
-    : settings.saving
-      ? '正在保存…'
-      : settingsError.value
-        ? '设置尚未同步'
-        : settings.saved
-          ? '已保存'
-          : '修改后自动保存'
-);
 
 async function setPreference(key: EditorPreferenceKey, value: boolean, event: MouseEvent) {
   const control = event.currentTarget as HTMLButtonElement;
@@ -109,20 +89,6 @@ async function setPreference(key: EditorPreferenceKey, value: boolean, event: Mo
     document.activeElement === document.body
   ) {
     control.focus({ preventScroll: true });
-  }
-}
-
-async function retry() {
-  const hadFocus = !!panel.value?.contains(document.activeElement);
-  if (settings.loadError) await settings.load();
-  else await settings.retrySave();
-  await nextTick();
-  if (hadFocus && open.value && document.activeElement === document.body) {
-    panel.value
-      ?.querySelector<HTMLButtonElement>(
-        'button[role="switch"]:not(:disabled), .editor-settings__retry:not(:disabled)'
-      )
-      ?.focus({ preventScroll: true });
   }
 }
 
@@ -152,16 +118,6 @@ function focusPanel() {
       font-size 13px
       font-weight 600
 
-  &__description, &__status
-    margin 4px 0 0
-    color var(--color-text-tertiary)
-    font-size 12px
-    line-height 1.6
-
-  &__status
-    min-height 20px
-    margin-top 8px
-
   &__options
     margin-top 10px
 
@@ -173,27 +129,10 @@ function focusPanel() {
     width 100%
     min-height 44px
     padding 8px 0
-    border 0
     border-radius 6px
-    background transparent
     color var(--color-text-secondary)
     font inherit
     text-align left
-    cursor pointer
-
-    &:hover:not(:disabled)
-      color var(--color-text-primary)
-
-    &:active:not(:disabled) .editor-settings__track
-      filter brightness(.9)
-
-    &:focus-visible
-      outline 2px solid var(--color-accent)
-      outline-offset 3px
-
-    &:disabled
-      opacity .5
-      cursor not-allowed
 
     &[aria-checked='true'] .editor-settings__track
       background var(--color-accent)

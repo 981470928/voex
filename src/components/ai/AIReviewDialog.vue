@@ -75,7 +75,6 @@
           </button>
         </div>
       </template>
-      <p v-if="error" class="ai-error" role="alert">{{ error }}</p>
       <p class="ai-review__note">
         取消后仍可从对话中的“审阅修改”重新打开。原文件变化时，旧建议不会覆盖新内容。
       </p>
@@ -92,7 +91,7 @@
           :aria-busy="applying"
           @click="emit('apply')"
         >
-          {{ applying ? '正在应用…' : '应用并保存' }}
+          应用并保存
         </button>
       </div>
     </template>
@@ -109,7 +108,6 @@ import './ai.styl';
 const props = defineProps<{
   review: ReviewSnapshot | null;
   applying: boolean;
-  error: string;
   canApply: boolean;
 }>();
 const emit = defineEmits<{ close: []; apply: [] }>();

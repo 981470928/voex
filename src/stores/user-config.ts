@@ -4,7 +4,8 @@ import { authUser, sessionExpired } from '@/service/auth-session';
 import { getUserConfig, patchUserConfig, type UserConfig } from '@/service/api/user-config-api';
 import { errorMessage } from '@/utils/error';
 
-export type EditorPreferenceKey = 'editorOutlineVisible' | 'editorMinimapVisible';
+export type EditorPreferenceKey =
+  'editorOutlineVisible' | 'editorMinimapVisible' | 'editorZenFullscreen';
 
 export const useUserConfigStore = defineStore('user-config', () => {
   const config = shallowRef<UserConfig>({});
@@ -17,6 +18,7 @@ export const useUserConfigStore = defineStore('user-config', () => {
   const failedPatch = shallowRef<UserConfig | null>(null);
   const showOutline = computed(() => config.value.editorOutlineVisible !== false);
   const showMinimap = computed(() => config.value.editorMinimapVisible !== false);
+  const zenFullscreen = computed(() => config.value.editorZenFullscreen !== false);
   const canChange = computed(
     () =>
       loaded.value && !loading.value && !saving.value && !sessionExpired.value && !!authUser.value
@@ -107,6 +109,7 @@ export const useUserConfigStore = defineStore('user-config', () => {
   return {
     showOutline,
     showMinimap,
+    zenFullscreen,
     loaded,
     loading,
     saving,

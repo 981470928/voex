@@ -8,6 +8,7 @@ export async function runAgent(options: {
   context: AgentContext;
   history: ChatMessage[];
   onText: (text: string) => void;
+  onReasoning: (text: string) => void;
   onActivity: (text: string) => void;
 }) {
   const { model, registry, context } = options;
@@ -35,6 +36,7 @@ export async function runAgent(options: {
 当前文件元数据：${JSON.stringify({ file_key: context.document.file_key, file_name: context.document.file_name, writable: context.document.writable })}。
 开始修改前用 read_document 读取正文。完成修改后概述修改并提示审阅。`;
   let text = '';
+  let reasoning = '';
   const usedCalls = new Set<string>();
   for (let round = 0; round < 10; round++) {
     context.signal.throwIfAborted();
@@ -47,6 +49,10 @@ export async function runAgent(options: {
       context.signal
     );
     history.push(response);
+    if (response.reasoning) {
+      reasoning += (reasoning ? '\n\n' : '') + response.reasoning;
+      options.onReasoning(reasoning);
+    }
     if (response.text) {
       text += (text ? '\n\n' : '') + response.text;
       options.onText(text);
