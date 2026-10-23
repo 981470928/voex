@@ -3,6 +3,8 @@ import type { ApiError } from './index';
 import type { DocumentSummary } from './document-api';
 
 export interface ProjectPermissions {
+  remove: boolean;
+  children_remove: boolean;
   read: boolean;
   write: boolean;
   manage: boolean;

@@ -5,7 +5,10 @@ import { getUserConfig, patchUserConfig, type UserConfig } from '@/service/api/u
 import { errorMessage } from '@/utils/error';
 
 export type EditorPreferenceKey =
-  'editorOutlineVisible' | 'editorMinimapVisible' | 'editorZenFullscreen';
+  | 'editorOutlineVisible'
+  | 'editorMinimapVisible'
+  | 'editorZenFullscreen'
+  | 'editorCodeMirrorEnabled';
 
 export const useUserConfigStore = defineStore('user-config', () => {
   const config = shallowRef<UserConfig>({});
@@ -19,6 +22,7 @@ export const useUserConfigStore = defineStore('user-config', () => {
   const showOutline = computed(() => config.value.editorOutlineVisible !== false);
   const showMinimap = computed(() => config.value.editorMinimapVisible !== false);
   const zenFullscreen = computed(() => config.value.editorZenFullscreen !== false);
+  const codeMirrorEnabled = computed(() => config.value.editorCodeMirrorEnabled !== false);
   const canChange = computed(
     () =>
       loaded.value && !loading.value && !saving.value && !sessionExpired.value && !!authUser.value
@@ -110,6 +114,7 @@ export const useUserConfigStore = defineStore('user-config', () => {
     showOutline,
     showMinimap,
     zenFullscreen,
+    codeMirrorEnabled,
     loaded,
     loading,
     saving,

@@ -12,6 +12,7 @@ interface TrashItemBase {
   deleted_at: string;
   expires_at: string;
   can_restore: boolean;
+  can_purge: boolean;
 }
 
 export type TrashItem =
@@ -26,6 +27,7 @@ export interface TrashListQuery {
 }
 
 export interface TrashListResponse {
+  can_manage_all: boolean;
   items: TrashItem[];
   total: number;
   limit: number;
@@ -44,4 +46,17 @@ export function restoreTrash(type: TrashType, key: string) {
 
 export function purgeTrash(type: TrashType, key: string) {
   return http.delete<ApiError, { success: true }>(`/trash/${type}/${encodeURIComponent(key)}`);
+}
+
+export function restoreAllTrash(teamKey: string, projectKey?: string) {
+  return http.post<unknown, { success: boolean }>(
+    '/trash/restore-all',
+    {},
+    { params: { team_key: teamKey, project_key: projectKey || undefined } }
+  );
+}
+export function clearTrash(teamKey: string, projectKey?: string) {
+  return http.delete<unknown, { success: boolean }>('/trash', {
+    params: { team_key: teamKey, project_key: projectKey || undefined },
+  });
 }

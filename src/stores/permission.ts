@@ -26,7 +26,7 @@ export const usePermissionStore = defineStore('permission', () => {
       manage: read && source?.permissions?.manage === true,
       share: read && source?.permissions?.share === true,
       rename: projectAccess && write,
-      remove: read && (source?.permissions?.remove ?? (projectAccess && write)),
+      remove: read && source?.permissions?.remove === true,
       details: read,
       directory: projectAccess && read,
     };
@@ -38,7 +38,15 @@ export const usePermissionStore = defineStore('permission', () => {
 
   // Folders always inherit project permissions; files may carry an explicit DTO.
   function folder(source?: PermissionSource | null) {
-    return project(source);
+    return resolve(
+      {
+        permissions: {
+          ...source?.permissions,
+          remove: source?.permissions?.children_remove === true,
+        },
+      },
+      true
+    );
   }
 
   function document(source?: PermissionSource | null, parent?: PermissionSource | null) {

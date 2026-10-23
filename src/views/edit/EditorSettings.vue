@@ -42,6 +42,7 @@
             class="editor-settings__switch"
             :aria-checked="option.checked"
             :aria-describedby="settingsError ? errorId : statusId"
+            :disabled="!settings.canChange"
             @click="setPreference(option.key, !option.checked, $event)"
           >
             <span>{{ option.label }}</span>
@@ -68,6 +69,11 @@ const errorId = id + '-settings-error';
 const options = computed(() => [
   { key: 'editorOutlineVisible' as const, label: '显示目录', checked: settings.showOutline },
   { key: 'editorMinimapVisible' as const, label: '显示小地图', checked: settings.showMinimap },
+  {
+    key: 'editorCodeMirrorEnabled' as const,
+    label: '代码块增强编辑',
+    checked: settings.codeMirrorEnabled,
+  },
   {
     key: 'editorZenFullscreen' as const,
     label: 'Zen 模式自动全屏',
@@ -120,6 +126,10 @@ function focusPanel() {
 
   &__options
     margin-top 10px
+
+    // Pending saves lock every switch without pulsing the global disabled opacity.
+    &[aria-busy='true'] .editor-settings__switch:disabled
+      opacity 1
 
   &__switch
     display flex

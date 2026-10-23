@@ -13,20 +13,21 @@ import type { DownloadOptions } from './upload-api';
 
 export type SharePermission = 'read' | 'edit';
 
-export interface FileShare {
-  id: string;
+export interface ShareLink {
   permission: SharePermission;
-  created_at: string;
-  revoked_at: string | null;
-  created_by: Creator;
-  can_revoke: boolean;
-}
-
-export interface CreatedFileShare {
-  id: string;
   token: string;
+  enabled: boolean;
+}
+export interface FileGrant {
+  user_id: string;
+  name: string;
   permission: SharePermission;
-  created_at: string;
+  member: boolean;
+}
+export interface SharingSettings {
+  links: ShareLink[];
+  can_manage: boolean;
+  access: FileGrant[];
 }
 
 export interface SharedFile {
@@ -42,21 +43,20 @@ export interface SharedFile {
   attachments: FileInfo[];
 }
 
-export function listFileShares(fileKey: string, signal?: AbortSignal) {
-  return http.get<unknown, FileShare[]>(`/document/${encodeURIComponent(fileKey)}/shares`, {
+export function getFileSharing(key: string, signal?: AbortSignal) {
+  return http.get<unknown, SharingSettings>(`/document/${encodeURIComponent(key)}/sharing`, {
     signal,
   });
 }
-
-export function createFileShare(fileKey: string, permission: SharePermission) {
-  return http.post<unknown, CreatedFileShare>(`/document/${encodeURIComponent(fileKey)}/shares`, {
+export function setFileSharing(key: string, permission: SharePermission, enabled: boolean) {
+  return http.patch<unknown, { success: boolean }>(`/document/${encodeURIComponent(key)}/sharing`, {
     permission,
+    enabled,
   });
 }
-
-export function revokeFileShare(fileKey: string, shareId: string) {
+export function revokeFileAccess(key: string, userId: string) {
   return http.delete<unknown, { success: boolean }>(
-    `/document/${encodeURIComponent(fileKey)}/shares/${encodeURIComponent(shareId)}`
+    `/document/${encodeURIComponent(key)}/access/${encodeURIComponent(userId)}`
   );
 }
 
@@ -96,15 +96,6 @@ export async function getSharedFile(token: string, signal?: AbortSignal) {
     headers: shareHeaders(token),
     signal,
   });
-  return data;
-}
-
-export async function updateSharedFile(token: string, file_content: string, revision: number) {
-  const { data } = await sharedHttp.put<{ success: boolean; revision: number }>(
-    '/shared-file',
-    { file_content, revision },
-    { headers: shareHeaders(token) }
-  );
   return data;
 }
 

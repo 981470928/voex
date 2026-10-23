@@ -271,11 +271,6 @@ Response: {
   attachments: [{ hash, name, mime, creator: { id, name, avator: "" } }]
 }
 
-PUT /api/shared-file
-Header: X-Share-Token: <token>
-Body: { file_content: string, revision: number }
-Response: { success: true, revision: number }
-
 GET /api/shared-file/attachments/:hash
 Header: X-Share-Token: <token>
 Response: 附件二进制，Content-Disposition: attachment
@@ -287,13 +282,13 @@ Response: 当前文件创建者的 WebP 头像；无头像返回 404
 
 公开响应不暴露父团队、项目、文件夹标识或成员联系方式。头像字段非空时返回 `/api/shared-file/creator-avator`，读取也需同一分享请求头。附件下载必须同时匹配分享文件和指定 hash，不能用其他文件的 hash 获取内容。
 
-公共 PUT 只接受 `file_content` 和 `revision`，额外字段返回 400。只读链接且无项目编辑权限时返回 403。公开响应设置 `Cache-Control: no-store` 和 `Referrer-Policy: no-referrer`，每次请求检查链接是否已撤销；撤销后后续读取、编辑和下载均失效。
+公开分享接口不提供 PUT 写入。正文保存使用 `PUT /api/document/:fileKey`，需要有效登录身份、账号文件 write 权限和 revision；不能仅用 X-Share-Token 修改文件。公开读取响应设置 `Cache-Control: no-store` 和 `Referrer-Policy: no-referrer`，每次读取检查链接是否撤销。撤销阻止继续通过该链接访问，但不收回已授予账号的文件权限。
 
 ## 8. 上传与错误响应
 
 `POST /api/assets/upload` 继续要求 JWT，按 `path` 保存到 `/home/update` 下的目录，目录规则与容量限制见 [AUTH-API.md](/C:/Users/WS/Desktop/myself/voex-main/AUTH-API.md)。文件分享 token 不能调用此接口。
 
-文档附件上传 `POST /api/upload` 也要求 JWT 及目标文件的项目编辑权限，multipart 字段仍为 `fileKey`、`file`、可选 `file_name`、`mime`，返回 `{ hash, creator }`，正文存储在 `/home/static`。普通的附件列表、下载和删除接口跟随文件的项目权限；公开附件下载使用上一节专用接口。
+文档附件上传 `POST /api/upload` 也要求 JWT 及目标文件的编辑权限，multipart 字段仍为 `fileKey`、`file`、可选 `file_name`、`mime`，返回 `{ hash, creator }`，正文存储在 `/home/static`。普通的附件列表、下载和删除接口跟随文件的账号权限；公开附件下载使用上一节专用接口。
 
 独立资源默认仅创建者可读。当前用户头像可由同团队成员读取；文件分享仅开放该文件创建者当前头像的专用读取接口，不开放任意独立资源。
 
@@ -310,3 +305,5 @@ Response: 当前文件创建者的 WebP 头像；无头像返回 404
 邀请链接接口已通过独立检查；自动打开邀请地址被浏览器 URL 策略拒绝，未绕过，因此不将邀请链接登录跳转列为已完成的浏览器验证。临时验收账号、团队、文件、附件和分享链接已清理；实施期间产生的其他数据保留。服务器备份目录的 `team-final-verification.json` 记录具体检查与清理结果。未生成或运行单元测试。
 
 当前服务器仅配置 HTTP；HTTPS 尚未配置，沿用 [AUTH-API.md](/C:/Users/WS/Desktop/myself/voex-main/AUTH-API.md) 的运行限制。前端生产文件未上传；本地开发入口为 [团队页面](http://localhost:3000/test/home/teams)。
+
+旧的分享正文写入入口已移除。分享页面和分享 API 只读；登录用户通过账号文件权限在普通 document 接口保存。历史匿名编辑验证记录仅描述旧版本，不代表当前支持匿名写入。

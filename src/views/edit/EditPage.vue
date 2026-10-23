@@ -75,7 +75,7 @@
         <button
           type="button"
           class="edit-page__icon-button"
-          :title="canShare ? '分享' : '分享（需要项目分享权限）'"
+          :title="canShare ? '分享' : '分享（需要文件编辑权限）'"
           aria-label="分享"
           :disabled="!documentReady || !canShare || busy"
           @click="showShare = true"
@@ -222,6 +222,7 @@
               floating-navigation
               :show-outline="showOutline"
               :show-minimap="userConfig.showMinimap && !zenMode"
+              :code-mirror-enabled="userConfig.codeMirrorEnabled"
               @ready="displayedDocument.onReady"
               @load-error="displayedDocument.onError"
               @change="displayedDocument.onChange"

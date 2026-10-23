@@ -13,6 +13,7 @@ export interface Team {
   created_at: string;
   privileges: { mode: 'members' };
   permissions: {
+    create_project: boolean;
     read: boolean;
     write: boolean;
     manage: boolean;

@@ -72,6 +72,7 @@
       </template>
       <template #actions>
         <button
+          v-if="canWrite"
           class="desktop__create"
           type="button"
           :title="folderKey ? '创建文件' : '创建文件夹'"
@@ -140,6 +141,15 @@ const notification = useNotificationStore();
 const teams = useTeamStore();
 const permission = usePermissionStore();
 const fileList = ref<{ focusEntry: (key?: string) => void }>();
+const shareOpen = ref(false);
+const shareFile = ref({ key: '', name: '' });
+useDialog(ModalType.SHARE_DIALOG, {
+  visible: () => shareOpen.value,
+  props: () => ({ fileKey: shareFile.value.key, fileName: shareFile.value.name }),
+  onClose: () => {
+    shareOpen.value = false;
+  },
+});
 const detailsOpen = ref(false);
 const detailsFile = ref({ key: '', name: '' });
 const privilegesOpen = ref(false);
@@ -255,6 +265,9 @@ function entryMenu(entry: Entry): ContextMenuItem[] {
       disabled: unavailable || !entry.permissions.rename,
       description: !entry.permissions.rename ? '没有编辑权限' : undefined,
     },
+    ...(entry.kind === 'document' && entry.permissions.write
+      ? [{ value: 'share', label: '分享', icon: 'share' }]
+      : []),
     ...(entry.kind === 'document'
       ? [
           {
@@ -285,7 +298,10 @@ function selectEntryMenu(value: string, selected: Entry, trigger: HTMLElement | 
   if (!entry || loading.value || busy.value || creating.value) return;
   if (value === 'open' && entry.permissions.read && entry.location)
     void router.push(entry.location);
-  else if (value === 'rename') rename(entry);
+  else if (value === 'share' && entry.kind === 'document' && entry.permissions.write) {
+    shareFile.value = { key: entry.key, name: entry.name };
+    shareOpen.value = true;
+  } else if (value === 'rename') rename(entry);
   else if (value === 'delete') void remove(entry, trigger);
   else if (value === 'details' && entry.kind === 'document' && entry.permissions.details) {
     detailsFile.value = { key: entry.key, name: entry.name };

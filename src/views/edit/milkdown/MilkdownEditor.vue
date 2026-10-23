@@ -44,11 +44,24 @@
           <template v-else>{{ action.text }}</template>
         </button>
         <div ref="toolbarColorHost" class="milkdown-editor__color-controls" />
+        <button
+          v-for="layout in ['horizontal', 'vertical'] as const"
+          :key="layout"
+          type="button"
+          class="milkdown-editor__action"
+          :disabled="loading || !ready || componentInsertionBlocked"
+          :title="layout === 'horizontal' ? '插入横向卡片列表' : '插入纵向卡片列表'"
+          :aria-label="layout === 'horizontal' ? '插入横向卡片列表' : '插入纵向卡片列表'"
+          @mousedown.prevent
+          @click="insertCardList(layout)"
+        >
+          <SvgIcon :name="layout === 'horizontal' ? 'grid' : 'list'" :size="16" />
+        </button>
         <span v-if="allowAttachments" class="milkdown-editor__separator" aria-hidden="true" />
         <button
           type="button"
           class="milkdown-editor__action"
-          :disabled="loading || !ready"
+          :disabled="loading || !ready || componentInsertionBlocked"
           title="插入表情"
           aria-label="插入表情"
           aria-haspopup="dialog"
@@ -60,7 +73,7 @@
         <button
           type="button"
           class="milkdown-editor__action"
-          :disabled="loading || !ready"
+          :disabled="loading || !ready || componentInsertionBlocked"
           aria-haspopup="dialog"
           title="图库"
           aria-label="图库"
@@ -72,7 +85,7 @@
         <button
           type="button"
           class="milkdown-editor__action"
-          :disabled="loading || !ready"
+          :disabled="loading || !ready || componentInsertionBlocked"
           title="插入或编辑 LaTeX 公式"
           aria-label="插入或编辑 LaTeX 公式"
           aria-haspopup="dialog"
@@ -84,7 +97,7 @@
         <button
           type="button"
           class="milkdown-editor__action"
-          :disabled="loading || !ready"
+          :disabled="loading || !ready || componentInsertionBlocked"
           title="插入或编辑流程图"
           aria-label="插入或编辑流程图"
           aria-haspopup="dialog"
@@ -99,7 +112,7 @@
           class="milkdown-editor__action"
           :title="uploading ? '上传中…' : '添加附件'"
           :aria-label="uploading ? '上传中…' : '添加附件'"
-          :disabled="loading || !ready || uploading"
+          :disabled="loading || !ready || uploading || componentInsertionBlocked"
           :aria-busy="uploading"
           @mousedown.prevent
           @click="uploadAndInsertAttachments"
@@ -216,7 +229,7 @@ import {
   serializerCtx,
 } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
-import { commonmark } from '@milkdown/kit/preset/commonmark';
+import { commonmark, insertHrInputRule } from '@milkdown/kit/preset/commonmark';
 import { columnResizingPlugin, gfm } from '@milkdown/kit/preset/gfm';
 import { history } from '@milkdown/kit/plugin/history';
 import { clipboard } from '@milkdown/kit/plugin/clipboard';
@@ -242,6 +255,9 @@ import {
   createAttachmentExtension,
   type AttachmentExtension,
 } from '@/views/edit/milkdown/attachment';
+import { createCardListExtension } from './card-list';
+import { inCardText, type CardLayout } from './card-list-model';
+import './card-list.styl';
 import { createEditorContent } from '@/views/edit/milkdown/editor-content';
 import { createEditorPaste } from '@/views/edit/milkdown/editor-paste';
 import { createEditorLinks } from '@/views/edit/milkdown/editor-links';
@@ -287,6 +303,7 @@ const props = withDefaults(
     showOutline?: boolean;
     showMinimap?: boolean;
     floatingNavigation?: boolean;
+    codeMirrorEnabled?: boolean;
   }>(),
   {
     defaultValue: '',
@@ -303,6 +320,7 @@ const props = withDefaults(
     showOutline: true,
     showMinimap: true,
     floatingNavigation: false,
+    codeMirrorEnabled: true,
   }
 );
 
@@ -316,6 +334,7 @@ const editorRef = shallowRef<Editor | null>(null);
 const attachmentExtensionRef = shallowRef<AttachmentExtension | null>(null);
 const ready = ref(false);
 const uploading = ref(false);
+const componentInsertionBlocked = ref(false);
 const toolbarState = shallowRef<Record<string, { active: boolean; enabled: boolean }>>({});
 const toolbarRef = ref<HTMLElement>();
 const editorRoot = ref<HTMLElement | null>(null);
@@ -422,6 +441,11 @@ const imageImport = createImageImport({
     return props.loadImage(hash, signal, documentKey);
   },
 });
+const cards = createCardListExtension({
+  readonly: () => props.readonly,
+  imageImport,
+  onError: (message) => notification.show(message, 'error'),
+});
 const paste = createEditorPaste({
   readonly: () => props.readonly,
   onError: (message) => notification.show(message, 'error'),
@@ -456,6 +480,7 @@ const tables = createEditorTables({
 });
 const codeBlocks = createEditorCodeBlock({
   readonly: () => props.readonly,
+  enabled: () => props.codeMirrorEnabled,
   notify: (message, tone) => notification.show(message, tone),
 });
 const links = createEditorLinks({
@@ -468,6 +493,7 @@ const interactions = createEditorInteractions({
   onAttachment: () => void uploadAndInsertAttachments(),
   onLink: editLink,
   onPexels: openPexels,
+  onCardList: insertCardList,
   onColorToolbar: (element) => {
     floatingColorHost.value = element;
   },
@@ -492,6 +518,16 @@ const toolbarActions: EditorAction[] = [
 
 function canEdit(editor = editorRef.value): editor is Editor {
   return !disposed && !props.readonly && editor?.status === EditorStatus.Created;
+}
+
+function canInsertComponent(editor: Editor): boolean {
+  return editor.action((ctx) => !inCardText(ctx.get(editorViewCtx).state.selection));
+}
+
+function insertCardList(layout: CardLayout) {
+  const editor = editorRef.value;
+  if (!canEdit(editor) || !canInsertComponent(editor)) return;
+  editor.action((ctx) => cards.insert(ctx, layout));
 }
 
 function publishMarkdown(markdown: string) {
@@ -690,6 +726,7 @@ function syncSelection(ctx: Ctx, selection?: Selection, focused?: boolean) {
 }
 
 function refreshToolbar(ctx: Ctx) {
+  componentInsertionBlocked.value = inCardText(ctx.get(editorViewCtx).state.selection);
   toolbarColors.value = {
     textColor: textColors.selected(ctx, 'textColor'),
     highlight: textColors.selected(ctx, 'highlight'),
@@ -755,7 +792,7 @@ function restoreSelection(ctx: Ctx, key: symbol) {
 
 function openEmoji() {
   const editor = editorRef.value;
-  if (!canEdit(editor) || emojiSelection.value) return;
+  if (!canEdit(editor) || !canInsertComponent(editor) || emojiSelection.value) return;
   interactions.hide();
   emojiSelection.value = { key: rememberSelection(editor), editor, version: readonlyVersion };
 }
@@ -785,6 +822,8 @@ function insertEmoji(emoji: Emoji) {
   try {
     session.editor.action((ctx) => {
       restoreSelection(ctx, session.key);
+      if (inCardText(ctx.get(editorViewCtx).state.selection))
+        throw new Error('卡片文字区域只支持文字');
       emojiExtension.insert(ctx, emoji);
     });
     closeEmoji();
@@ -795,7 +834,7 @@ function insertEmoji(emoji: Emoji) {
 
 function openLatex(position?: number) {
   const editor = editorRef.value;
-  if (!canEdit(editor) || latexSelection.value) return;
+  if (!canEdit(editor) || !canInsertComponent(editor) || latexSelection.value) return;
   interactions.hide();
   const initial = editor.action((ctx) => {
     if (position !== undefined) latexExtension.select(ctx, position);
@@ -832,6 +871,8 @@ function insertLatex(attrs: LatexAttrs) {
     throw new Error('当前文档不可编辑，请关闭弹窗后重试');
   session.editor.action((ctx) => {
     restoreSelection(ctx, session.key);
+    if (inCardText(ctx.get(editorViewCtx).state.selection))
+      throw new Error('卡片文字区域只支持文字');
     latexExtension.insert(ctx, attrs, session.editing);
   });
   // 公式参数提交后立即更新保存快照，避免防抖期间仍显示旧的“修改已保存”。
@@ -840,7 +881,7 @@ function insertLatex(attrs: LatexAttrs) {
 
 function openMermaid(position?: number) {
   const editor = editorRef.value;
-  if (!canEdit(editor) || mermaidSelection.value) return;
+  if (!canEdit(editor) || !canInsertComponent(editor) || mermaidSelection.value) return;
   interactions.hide();
   const initial = editor.action((ctx) => {
     if (position !== undefined) mermaidExtension.select(ctx, position);
@@ -877,6 +918,8 @@ function insertMermaid(code: string) {
     throw new Error('当前文档不可编辑，请关闭弹窗后重试');
   session.editor.action((ctx) => {
     restoreSelection(ctx, session.key);
+    if (inCardText(ctx.get(editorViewCtx).state.selection))
+      throw new Error('卡片文字区域只支持文字');
     mermaidExtension.insert(ctx, code, session.editing);
   });
   publishMarkdown(session.editor.action(serializeMarkdown()));
@@ -884,7 +927,7 @@ function insertMermaid(code: string) {
 
 function openPexels() {
   const editor = editorRef.value;
-  if (!canEdit(editor) || pexelsSelection.value) return;
+  if (!canEdit(editor) || !canInsertComponent(editor) || pexelsSelection.value) return;
   interactions.hide();
   pexelsSelection.value = { key: rememberSelection(editor), editor, version: readonlyVersion };
 }
@@ -949,7 +992,13 @@ async function insertPexelsPhoto(photo: PexelsPhoto) {
 
 async function uploadAndInsertAttachments() {
   const editor = editorRef.value;
-  if (!canEdit(editor) || uploading.value || !props.allowAttachments || !props.uploadAttachments)
+  if (
+    !canEdit(editor) ||
+    !canInsertComponent(editor) ||
+    uploading.value ||
+    !props.allowAttachments ||
+    !props.uploadAttachments
+  )
     return;
   const key = rememberSelection(editor);
   const version = readonlyVersion;
@@ -1168,9 +1217,11 @@ const { loading: initializing } = useEditor((root) => {
         .blur((ctx) => syncSelection(ctx, undefined, false))
         .destroy(() => editorStore.clearSelection(editorId));
     })
+    .use(cards.guardPlugins)
     .use(paste.plugins)
     .use(content.plugins)
-    .use(commonmark)
+    .use(commonmark.filter((plugin) => plugin !== insertHrInputRule))
+    .use(cards.plugins)
     .use(columnResizingPlugin)
     .use(gfm)
     .use(history)
@@ -1225,6 +1276,7 @@ watch(
     paste.readonlyChanged();
     imageImport.readonlyChanged();
     content.readonlyChanged();
+    cards.readonlyChanged();
     attachmentExtensionRef.value?.refreshAvailability();
     latexExtension.readonlyChanged();
     mermaidExtension.readonlyChanged();
@@ -1244,6 +1296,15 @@ watch(
     }
   },
   { flush: 'sync' }
+);
+
+watch(
+  () => props.codeMirrorEnabled,
+  () => {
+    if (editorRef.value?.status === EditorStatus.Created)
+      editorRef.value.action(codeBlocks.enabledChanged);
+  },
+  { flush: 'post' }
 );
 
 watch(
@@ -1292,6 +1353,10 @@ onBeforeUnmount(() => {
 });
 
 function insertImportedFile(ctx: Ctx, file: FileInfo): boolean {
+  if (inCardText(ctx.get(editorViewCtx).state.selection)) {
+    notification.show('卡片文字区域只支持文字，请使用图片区域添加图片', 'info');
+    return false;
+  }
   if (!file.mime.startsWith('image/'))
     return attachmentExtensionRef.value?.insertAttachment(ctx, file) ?? false;
   const view = ctx.get(editorViewCtx);

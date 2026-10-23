@@ -49,11 +49,12 @@
             <span class="home-aside__caret" aria-hidden="true"></span>
           </h2>
           <button
+            v-if="currentTeam?.permissions.create_project"
             class="home-aside__create"
             type="button"
             title="创建项目"
             aria-label="创建项目"
-            :disabled="loading || creating || busy || !currentTeam?.permissions.write"
+            :disabled="loading || creating || busy || !currentTeam?.permissions.create_project"
             @click="openCreateProject"
           >
             <SvgIcon name="add" :size="14" />
@@ -235,13 +236,17 @@ const contextMenuItems = computed<ContextMenuItem[]>(() => {
   const disabled =
     loading.value || creating.value || busy.value || !permission.project(project).write;
   return [
-    {
-      value: 'create-folder',
-      label: '创建文件夹',
-      icon: 'folder',
-      disabled,
-      description: !permission.project(project).write ? '没有编辑权限' : undefined,
-    },
+    ...(permission.project(project).write
+      ? [
+          {
+            value: 'create-folder',
+            label: '创建文件夹',
+            icon: 'folder',
+            disabled,
+            description: !permission.project(project).write ? '没有编辑权限' : undefined,
+          },
+        ]
+      : []),
     {
       value: 'rename',
       label: '重命名',
@@ -255,8 +260,9 @@ const contextMenuItems = computed<ContextMenuItem[]>(() => {
       label: '彻底删除项目',
       icon: 'trash',
       danger: true,
-      disabled,
-      description: permission.project(project).write ? '包含回收站内容，无法恢复' : '没有删除权限',
+      disabled:
+        loading.value || creating.value || busy.value || !permission.project(project).remove,
+      description: permission.project(project).remove ? '包含回收站内容，无法恢复' : '没有删除权限',
     },
   ];
 });
@@ -334,7 +340,7 @@ function selectProjectMenu(item: ContextMenuOption) {
   if (!project || !canEditProject(project)) return;
   if (item.value === 'rename' || item.value === 'create-folder') {
     openProjectInput(project, item.value);
-  } else if (item.value === 'delete') {
+  } else if (item.value === 'delete' && permission.project(project).remove) {
     void removeProject(project);
   }
 }
@@ -367,7 +373,7 @@ function openProjectInput(project: ProjectInfo, action: 'rename' | 'create-folde
 }
 
 async function removeProject(project: ProjectInfo) {
-  if (!canEditProject(project)) return;
+  if (!canEditProject(project) || !permission.project(project).remove) return;
   const from = route.fullPath;
   const trigger = contextMenu.value?.trigger;
   let restoreFocus = false;
@@ -454,7 +460,13 @@ async function loadProjects() {
 
 function openCreateProject() {
   const selected = currentTeam.value;
-  if (!active || loading.value || creating.value || busy.value || !selected?.permissions.write)
+  if (
+    !active ||
+    loading.value ||
+    creating.value ||
+    busy.value ||
+    !selected?.permissions.create_project
+  )
     return;
   modal.showModal(ModalType.INPUT_DIALOG, {
     title: '创建项目',

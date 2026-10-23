@@ -29,9 +29,12 @@ import {
   codeBlockView,
   type CodeMirrorBlock,
 } from '@milkdown/kit/component/code-block';
+import { editorViewCtx } from '@milkdown/kit/core';
 import type { Ctx } from '@milkdown/kit/ctx';
+import { DOMSerializer } from '@milkdown/kit/prose/model';
 import { codeBlockSchema } from '@milkdown/kit/preset/commonmark';
 import { $view } from '@milkdown/kit/utils';
+import { prism } from '@milkdown/plugin-prism';
 import pageIcon from '@/assets/svg/page.svg?raw';
 import searchIcon from '@/assets/svg/search.svg?raw';
 import closeIcon from '@/assets/svg/close.svg?raw';
@@ -83,6 +86,7 @@ const codeHighlight = HighlightStyle.define([
 
 export function createEditorCodeBlock(options: {
   readonly: () => boolean;
+  enabled: () => boolean;
   notify: (message: string, tone: 'success' | 'error' | 'info') => void;
 }) {
   const blocks = new Set<CodeMirrorBlock>();
@@ -93,6 +97,11 @@ export function createEditorCodeBlock(options: {
   const enhancedView = $view(codeBlockSchema.node, () => {
     const createView = codeBlockView.view;
     return (...args) => {
+      if (!options.enabled()) {
+        const [node, view] = args;
+        // Let ProseMirror own ordinary code editing through the existing schema's contentDOM.
+        return DOMSerializer.renderSpec(view.dom.ownerDocument, node.type.spec.toDOM!(node));
+      }
       const block = createView(...args) as CodeMirrorBlock;
       const root = block.dom;
       const document = root.ownerDocument;
@@ -239,7 +248,20 @@ export function createEditorCodeBlock(options: {
     };
   });
   return {
-    plugins: [...codeBlockComponent, enhancedView],
+    // Plain code blocks keep syntax colors without mounting a CodeMirror instance.
+    plugins: [...prism, ...codeBlockComponent, enhancedView],
+    enabledChanged(ctx: Ctx) {
+      const view = ctx.get(editorViewCtx);
+      if (view.isDestroyed) return;
+      const render = enhancedView.view;
+      // A new constructor makes ProseMirror dispose old node views without changing EditorState.
+      view.setProps({
+        nodeViews: {
+          ...view.props.nodeViews,
+          [codeBlockSchema.type(ctx).name]: (...args) => render(...args),
+        },
+      });
+    },
     readonlyChanged() {
       // The parent first updates ProseMirror.editable; refresh even when the document is unchanged.
       queueMicrotask(() => {

@@ -2,6 +2,24 @@
   <main class="trash-page team-ui">
     <header class="trash-page__header">
       <h1 class="trash-page__title">回收站</h1>
+      <div v-if="canManageAll" class="team-ui__actions">
+        <button
+          type="button"
+          class="team-ui__button"
+          :disabled="loading || !!busy || !total"
+          @click="bulk('restore')"
+        >
+          恢复全部
+        </button>
+        <button
+          type="button"
+          class="team-ui__button"
+          :disabled="loading || !!busy || !total"
+          @click="bulk('purge')"
+        >
+          清空回收站
+        </button>
+      </div>
       <button class="team-ui__button" type="button" :disabled="loading || !!busy" @click="load">
         <SvgIcon name="refresh" :size="14" />刷新
       </button>
@@ -16,15 +34,15 @@
           :disabled="!!busy"
           @change="setFilter('project_key', $event)"
         >
-          <option value="">全部可管理项目</option>
+          <option value="">全部项目</option>
           <option
-            v-if="projectKey && !writableProjects.some((item) => item.project_key === projectKey)"
+            v-if="projectKey && !readableProjects.some((item) => item.project_key === projectKey)"
             :value="projectKey"
           >
             当前项目不可用
           </option>
           <option
-            v-for="project in writableProjects"
+            v-for="project in readableProjects"
             :key="project.project_key"
             :value="project.project_key"
           >
@@ -126,7 +144,7 @@
                 <button
                   class="team-ui__button team-ui__button--danger"
                   type="button"
-                  :disabled="!!busy"
+                  :disabled="!!busy || !item.can_purge"
                   :aria-label="`彻底删除${item.name}`"
                   @click="mutate(item, 'purge', $event)"
                 >
@@ -177,7 +195,14 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import SvgIcon from '@/components/SvgIcon.vue';
-import { listTrash, restoreTrash, purgeTrash, type TrashItem } from '@/service/api/trash-api';
+import {
+  listTrash,
+  restoreTrash,
+  purgeTrash,
+  restoreAllTrash,
+  clearTrash,
+  type TrashItem,
+} from '@/service/api/trash-api';
 import { queryProjects, type ProjectInfo } from '@/service/api/workspace-api';
 import { authUser } from '@/service/auth-session';
 import { useTeamStore } from '@/stores/team';
@@ -196,6 +221,7 @@ const { confirm } = useConfirm();
 const items = ref<TrashItem[]>([]);
 const projects = ref<ProjectInfo[]>([]);
 const total = ref(0);
+const canManageAll = ref(false);
 const loading = ref(true);
 const loadError = ref('');
 const actionError = ref('');
@@ -208,8 +234,8 @@ const projectKey = computed(() =>
   typeof route.query.project_key === 'string' ? route.query.project_key : ''
 );
 const teamName = computed(() => teams.resolve(teamKey.value)?.name || '当前团队');
-const writableProjects = computed(() =>
-  projects.value.filter((project) => project.permissions.write)
+const readableProjects = computed(() =>
+  projects.value.filter((project) => project.permissions.read)
 );
 const projectNames = computed(
   () => new Map(projects.value.map((project) => [project.project_key, project.name]))
@@ -248,6 +274,7 @@ async function load() {
   loadError.value = '';
   items.value = [];
   total.value = 0;
+  canManageAll.value = false;
   projects.value = [];
   try {
     await teams.ensure();
@@ -264,6 +291,7 @@ async function load() {
     if (signal.aborted) return;
     projects.value = projectList;
     total.value = result.total;
+    canManageAll.value = result.can_manage_all;
     if (!result.items.length && query.offset > 0) {
       await setPage(Math.max(1, Math.ceil(result.total / query.limit)));
       return;
@@ -285,8 +313,52 @@ function setFilter(key: 'project_key' | 'limit', event: Event) {
   void router.replace({ query: { ...route.query, [key]: value || undefined, page: undefined } });
 }
 
+async function bulk(action: 'restore' | 'purge') {
+  if (!canManageAll.value || loading.value || busy.value) return;
+  const team = teams.resolve(teamKey.value);
+  if (!team) return;
+  const location = route.fullPath;
+  const user = authUser.value?.id;
+  const project = projectKey.value;
+  busy.value = 'bulk';
+  actionError.value = '';
+  let requested = false;
+  try {
+    const accepted = await confirm({
+      type: action === 'purge' ? MessageType.ERROR : MessageType.WARNING,
+      title: action === 'purge' ? '清空回收站' : '恢复全部',
+      content:
+        action === 'purge'
+          ? '彻底删除当前筛选范围内全部回收站内容（包括文件夹内的文件）？此操作无法撤销。'
+          : '恢复当前筛选范围内所有未过期的文件和文件夹？',
+      confirmText: action === 'purge' ? '彻底清空' : '恢复全部',
+    });
+    if (!accepted || disposed || route.fullPath !== location || authUser.value?.id !== user) return;
+    requested = true;
+    const result =
+      action === 'purge'
+        ? await clearTrash(team.team_key, project)
+        : await restoreAllTrash(team.team_key, project);
+    if (!result.success) throw new Error('操作未完成，请刷新后重试');
+    if (!disposed) notification.show(action === 'purge' ? '回收站已清空' : '恢复完成', 'success');
+  } catch (cause) {
+    if (!disposed && route.fullPath === location) actionError.value = errorMessage(cause);
+  } finally {
+    if (requested) {
+      teams.invalidateProjects();
+      if (!disposed && route.fullPath === location) await load();
+    }
+    busy.value = '';
+  }
+}
+
 async function mutate(item: TrashItem, action: 'restore' | 'purge', event: Event) {
-  if (disposed || busy.value || loading.value || (action === 'restore' && !item.can_restore))
+  if (
+    disposed ||
+    busy.value ||
+    loading.value ||
+    (action === 'restore' ? !item.can_restore : !item.can_purge)
+  )
     return;
   const location = route.fullPath;
   const userId = authUser.value?.id;

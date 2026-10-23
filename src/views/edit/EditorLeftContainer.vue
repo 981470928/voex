@@ -48,7 +48,8 @@
     </div>
     <div class="editor-left__footer">
       <button
-        :disabled="loading || creating || !permission.folder(tree?.project).write"
+        v-if="permission.folder(tree?.project).write"
+        :disabled="loading || creating"
         @click="$emit('create')"
       >
         <SvgIcon name="cross" :size="18" aria-hidden="true" />创建文件

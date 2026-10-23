@@ -11,17 +11,12 @@
       <p class="project-access__name">{{ project.name }}</p>
       <p v-if="loading" class="team-ui__state" role="status">正在加载团队成员…</p>
       <template v-else-if="!loadError">
-        <fieldset class="project-access__modes" :disabled="saving">
-          <legend>谁可以编辑此项目</legend>
-          <label><input v-model="mode" type="radio" value="inherit" /> 所有团队成员</label
-          ><label><input v-model="mode" type="radio" value="restricted" /> 指定团队成员</label>
-        </fieldset>
         <p class="team-ui__hint">
           团队所有者和管理员始终可以编辑此项目。文件夹继承项目权限；文件分享单独生效。
         </p>
-        <template v-if="mode === 'restricted'">
+        <div>
           <p class="team-ui__hint">
-            {{ selected.length }} 位成员已选择。空名单表示仅所有者与管理员可访问。
+            {{ selected.length }} 位成员已选择。空名单表示普通成员只读，所有者与管理员可编辑。
           </p>
           <div class="project-access__members">
             <label v-for="member in members" :key="member.user_id" class="project-access__member"
@@ -35,7 +30,7 @@
               ><span class="team-ui__badge">{{ teamRoleLabels[member.role] }}</span></label
             >
           </div>
-        </template>
+        </div>
       </template>
       <p class="team-ui__error" role="alert">{{ loadError || error }}</p>
       <div class="team-ui__actions">
@@ -75,7 +70,7 @@ const { confirm } = useConfirm();
 const router = useRouter();
 const notification = useNotificationStore();
 const members = ref<TeamMember[]>([]);
-const mode = ref<ProjectPrivileges['mode']>('inherit');
+const mode = ref<ProjectPrivileges['mode']>('restricted');
 const selected = ref<string[]>([]);
 const original = ref('');
 const loading = ref(false);
@@ -106,7 +101,7 @@ async function load() {
     ]);
     if (signal.aborted) return;
     members.value = list;
-    mode.value = privileges.mode;
+    mode.value = 'restricted';
     selected.value = (privileges.user_ids ?? []).filter((id) =>
       list.some((member) => member.user_id === id && member.role === 'member')
     );
@@ -141,10 +136,7 @@ async function save() {
     if (
       !(await confirm({
         title: '保存项目权限',
-        content:
-          mode.value === 'inherit'
-            ? '允许团队全部成员编辑此项目及其文件夹、文件？'
-            : `仅允许指定的 ${selected.value.length} 位成员及所有者、管理员编辑此项目。已有文件分享继续生效。`,
+        content: `仅允许指定的 ${selected.value.length} 位成员及所有者、管理员编辑此项目。其他团队成员保留只读权限，已有文件授权继续生效。`,
         confirmText: '保存权限',
       }))
     )

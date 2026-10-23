@@ -70,6 +70,15 @@ const loading = ref(true);
 const loadError = ref('');
 const busy = ref('');
 const fileList = ref<{ focusEntry: (key?: string) => void }>();
+const shareOpen = ref(false);
+const shareFile = ref({ key: '', name: '' });
+useDialog(ModalType.SHARE_DIALOG, {
+  visible: () => shareOpen.value,
+  props: () => ({ fileKey: shareFile.value.key, fileName: shareFile.value.name }),
+  onClose: () => {
+    shareOpen.value = false;
+  },
+});
 const detailsOpen = ref(false);
 const detailsFile = ref({ key: '', name: '' });
 useDialog(ModalType.FILE_DETAILS_DIALOG, {
@@ -120,6 +129,7 @@ function entryMenu(entry: RecentEntry): ContextMenuItem[] {
       disabled: !access.read,
       description: !access.read ? '没有访问权限或分享已撤销' : undefined,
     },
+    ...(access.write ? [{ value: 'share', label: '分享', icon: 'share' }] : []),
     ...(access.directory
       ? [{ value: 'directory', label: '跳转文件目录', icon: 'folder-open' }]
       : []),
@@ -146,7 +156,10 @@ function selectEntryMenu(value: string, selected: RecentEntry) {
   if (!entry || loading.value || busy.value) return;
   const access = permission.recent(entry.file);
   if (value === 'open' && access.read && entry.location) void router.push(entry.location);
-  else if (value === 'remove-record' && access.removeRecord) void remove(entry.file);
+  else if (value === 'share' && access.write) {
+    shareFile.value = { key: entry.key, name: entry.name };
+    shareOpen.value = true;
+  } else if (value === 'remove-record' && access.removeRecord) void remove(entry.file);
   else if (value === 'directory' && access.directory) void openDirectory(entry.file);
   else if (value === 'details' && access.details) {
     detailsFile.value = { key: entry.key, name: entry.name };

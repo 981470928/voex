@@ -117,7 +117,7 @@
             <p v-if="actionError" class="team-ui__error" role="alert">{{ actionError }}</p>
             <section v-if="tab === 'members'" aria-label="团队成员">
               <p class="team-page__description">
-                所有者与管理员可编辑全部项目；成员可创建项目，项目访问由授权决定。
+                所有者与管理员可创建项目并编辑全部项目；成员默认只读，项目编辑需单独授权。
               </p>
               <ul class="team-page__rows">
                 <li v-for="member in pageMembers" :key="member.user_id" class="team-page__row">

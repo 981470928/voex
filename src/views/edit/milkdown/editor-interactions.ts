@@ -1,6 +1,6 @@
 import { commandsCtx, editorViewCtx, editorViewOptionsCtx, type CmdKey } from '@milkdown/kit/core';
 import type { Ctx, MilkdownPlugin } from '@milkdown/kit/ctx';
-import { block, BlockProvider } from '@milkdown/kit/plugin/block';
+import { block, blockConfig, BlockProvider } from '@milkdown/kit/plugin/block';
 import { slashFactory, SlashProvider } from '@milkdown/kit/plugin/slash';
 import { tooltipFactory, TooltipProvider } from '@milkdown/kit/plugin/tooltip';
 import {
@@ -20,6 +20,8 @@ import { Fragment } from '@milkdown/kit/prose/model';
 import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
 
+import { CARD_LIST, CARD_ITEM, CARD_TEXT, type CardLayout } from './card-list-model';
+
 export interface EditorAction {
   id: string;
   label: string;
@@ -36,6 +38,7 @@ interface EditorInteractionOptions {
   onAttachment: () => void;
   onLink: () => void;
   onPexels: () => void;
+  onCardList: (layout: CardLayout) => void;
   onColorToolbar?: (element: HTMLElement | null) => void;
   isColorMenuOpen?: () => boolean;
 }
@@ -132,7 +135,11 @@ export function createFormattingActions(onLink: () => void): EditorAction[] {
   ];
 }
 
-function createSlashActions(onAttachment: () => void, onPexels: () => void): SlashAction[] {
+function createSlashActions(
+  onAttachment: () => void,
+  onPexels: () => void,
+  onCardList: (layout: CardLayout) => void
+): SlashAction[] {
   const action = (item: EditorAction, keywords: string, hint: string): SlashAction => ({
     ...item,
     keywords: `${item.label} ${keywords}`.toLowerCase(),
@@ -210,6 +217,18 @@ function createSlashActions(onAttachment: () => void, onPexels: () => void): Sla
       commandAction('table', '表格', '▦', () => insertTableCommand.key, { row: 3, col: 3 }),
       'table grid bg',
       '3 × 3 表格'
+    ),
+    ...(['horizontal', 'vertical'] as const).map((layout) =>
+      action(
+        {
+          id: `cards-${layout}`,
+          label: layout === 'horizontal' ? '横向卡片列表' : '纵向卡片列表',
+          text: layout === 'horizontal' ? '▤' : '▥',
+          run: () => onCardList(layout),
+        },
+        `card cards layout 卡片 列表 kp ${layout}`,
+        layout === 'horizontal' ? '最多 4 项，图片在上' : '左图右文，逐项排列'
+      )
     ),
     action(
       commandAction('divider', '分割线', '—', () => insertHrCommand.key),
@@ -343,6 +362,14 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
     hide: () => hideCallbacks.forEach((hide) => hide()),
     refresh: () => refreshTooltip?.(),
     configure: (ctx) => {
+      ctx.update(blockConfig.key, (config) => ({
+        ...config,
+        filterNodes: (pos, node) => {
+          if (node.type.name === CARD_LIST) return true;
+          if ([CARD_ITEM, CARD_TEXT].includes(node.type.name)) return false;
+          return config.filterNodes(pos, node);
+        },
+      }));
       let focusTooltip: (() => boolean) | undefined;
       let handleSlashKey: ((event: KeyboardEvent) => boolean) | undefined;
       let revealInsertedSlash: (() => void) | undefined;
@@ -526,7 +553,11 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
           const element = createPopover(view, 'milkdown-editor__slash', '插入内容');
           element.setAttribute('role', 'listbox');
           element.id = `milkdown-slash-${id}`;
-          const actions = createSlashActions(options.onAttachment, options.onPexels).filter(
+          const actions = createSlashActions(
+            options.onAttachment,
+            options.onPexels,
+            options.onCardList
+          ).filter(
             (action) => action.id !== 'attachment' || options.allowAttachments?.() !== false
           );
           let filtered: SlashAction[] = [];
@@ -901,6 +932,9 @@ export function createEditorInteractions(options: EditorInteractionOptions): {
             const active = provider.active;
             const paragraph = view.state.schema.nodes.paragraph;
             if (!canEdit(view) || !active || !paragraph) return;
+            const parent = active.$pos.parent;
+            const index = active.$pos.index() + 1;
+            if (!parent.canReplaceWith(index, index, paragraph)) return;
             const position = active.$pos.pos + active.node.nodeSize;
             const tr = view.state.tr.insert(
               position,
