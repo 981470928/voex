@@ -107,7 +107,7 @@ AI 对话按账号、文档和会话独立保存；面板顶部提供“当前�
 
 认证页面复用 `AuthLayout`（登录宽 320px，注册/资料宽 360px）、`AuthField`、`ProfileFields`、`AvatorPicker`。登录与注册的 Voex 既有白色 logo 位于标题上方，表单无外围卡片；系统字体，标题 20px / 600，输入 14px，按钮高 44px / 胶囊圆角，输入圆角 10px。账户资料使用 `/home/profile` 子路由，保留 Home 侧边栏；`AuthLayout` 的 embedded 模式省略认证 logo 与底部署名，透明背景融入工作台，表单在 Home 内容区内滚动。登录与注册在短屏与手机保持自然滚动，账号/密码不截断粘贴。会话过期使用既有 `VoexModal` 配合 `LoginForm`，避免销毁当前编辑页面。
 
-下载队列沿用全局 download store；编辑页使用 DownloadQueue 的 popover 变体，锚定左侧下载列表按钮，通过既有 useFloating 定位、翻转和视口避让。浮层使用 `--color-bg-secondary`、`--shadow-medium` 与 12px 容器圆角，内容独立滚动。分享页和上传调试页继续使用默认 inline 变体，不改变其布局。
+下载队列沿用全局 download store；编辑页使用 DownloadQueue 的 popover 变体，锚定左侧下载列表按钮，通过既有 useFloating 定位、翻转和视口避让。浮层使用 `--color-bg-secondary`、`--shadow-medium` 与 12px 容器圆角，内容独立滚动。上传调试页继续使用默认 inline 变体；分享只读页不再提供附件列表、预览、下载或下载队列。
 
 滚动条基线由 `src/assets/style/main.css` 全局定义，thumb/track/hover/active 映射现有主题变量，并提供 forced-colors 回退。按钮有 hover、focus-visible、pressed、disabled 状态。动画尊重 prefers-reduced-motion。
 
@@ -119,6 +119,10 @@ AI 对话按账号、文档和会话独立保存；面板顶部提供“当前�
 
 ## Do's and Don'ts
 
-使用后端返回权限控制项目行为，团队角色、项目授权与文件分享共同决定访问；creator 仅记录创建者。目录元数据不携带正文。创建失败保留输入，防止重复提交。文件切换前保护未保存内容，旧请求结果不能覆盖新路由。保留现有文档和附件数据。
+使用后端返回权限控制项目行为，团队角色、项目授权与文件分享共同决定访问；creator 决定文件删除权限；普通编辑者具有除删除文件之外的文件操作能力。目录元数据不携带正文。创建失败保留输入，防止重复提交。文件切换前保护未保存内容，旧请求结果不能覆盖新路由。保留现有文档和附件数据。
 
 本次按用户明确需求建立 JWT 登录、注册与资料编辑。不加入拖拽移动或批量操作、不引入新 UI 依赖。遵守项目约束，不生成或运行单元测试。验收采用类型检查、Lint、构建和浏览器实际交互；数据库实测与模拟接口验收分别记录。
+
+## 分享阅读页
+
+分享页始终以只读 MilkdownEditor 展示正文，保留正文图片加载，移除创建者头像、姓名、创建时间、权限标签与保存提示。标题相对页面正中对齐；右上角以原生 button switch 切换小地图和目录，使用现有主题变量、hover/focus/checked 状态，仅作用于当前阅读页，不保存到账号配置。窄屏标题独占居中一行，阅读操作保留在下一行右侧。未登录且链接可编辑时显示“登录可编辑”；已登录且服务端返回可编辑时进入 `/edit/:file_key`，编辑地址不带 query 或 fragment。所有编辑者复用同一完整侧栏、正文与自动保存，不按进入来源裁剪功能；删除权限由后端返回的 remove 决定。

@@ -80,20 +80,32 @@ const router = createRouter({
 });
 
 router.beforeEach(async (to, from) => {
-  if (to.meta.public) return true;
+  // Resolve old share editor URLs once, then use the account's document permissions.
+  if (to.name === 'edit' && to.query.access === 'share' && to.hash) {
+    return { name: 'share', hash: to.hash, replace: true };
+  }
+  if (to.name === 'edit' && (to.query.access === 'share' || to.query.access === 'recent')) {
+    return { name: 'edit', params: to.params, replace: true };
+  }
   if (
     to.meta.anonymous &&
     from.meta.anonymous &&
     from.hash &&
     !to.hash &&
-    to.query.return === '/join'
+    (to.query.return === '/join' || to.query.return === '/share')
   ) {
     return { path: to.path, query: to.query, hash: from.hash, replace: true };
   }
-  // Invitation credentials stay in URL fragments throughout authentication.
-  if (to.name === 'join' && !to.hash && from.meta.anonymous && from.hash) {
-    return { name: 'join', hash: from.hash, replace: true };
+  // Invitation and share credentials stay in fragments throughout authentication.
+  if (
+    (to.name === 'join' || (to.name === 'share' && from.query.return === '/share')) &&
+    !to.hash &&
+    from.meta.anonymous &&
+    from.hash
+  ) {
+    return { name: to.name, hash: from.hash, replace: true };
   }
+  if (to.meta.public) return true;
   if (
     !sessionInitialized.value ||
     (authenticated.value && accessExpiresAt.value < Date.now() + 30000)
@@ -107,7 +119,9 @@ router.beforeEach(async (to, from) => {
   if (to.meta.anonymous) {
     if (!authenticated.value) return true;
     const destination = safeReturnPath(to.query.return);
-    return destination === '/join' && to.hash ? { path: destination, hash: to.hash } : destination;
+    return (destination === '/join' || destination === '/share') && to.hash
+      ? { path: destination, hash: to.hash }
+      : destination;
   }
   if (authenticated.value) return true;
   // Re-authenticate over the existing screen so unsaved document contents stay mounted.

@@ -26,7 +26,7 @@ export const usePermissionStore = defineStore('permission', () => {
       manage: read && source?.permissions?.manage === true,
       share: read && source?.permissions?.share === true,
       rename: projectAccess && write,
-      remove: projectAccess && write,
+      remove: read && (source?.permissions?.remove ?? (projectAccess && write)),
       details: read,
       directory: projectAccess && read,
     };

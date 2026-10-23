@@ -16,6 +16,7 @@ export interface FileInfo {
 }
 
 export interface DocumentPermissions {
+  remove?: boolean;
   read: boolean;
   write: boolean;
   manage: boolean;
